@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stock Centralizado</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        @media print {
+            body * { visibility: hidden; }
+            #printArea, #printArea * { visibility: visible; }
+            #printArea {
+                position: absolute; left: 0; top: 0; width: 100%;
+                margin: 0; padding: 0; border: none !important; box-shadow: none !important;
+            }
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            .no-print { display: none !important; }
+            .print-only { display: block !important; }
+        }
+    </style>
+</head>
+<body class="h-full overflow-hidden bg-gray-50 text-gray-800 antialiased">
+    
+    <div id="root" class="h-full"></div>
+
+    <!-- Modal root para los modales de la app -->
+    <div id="modal-root"></div>
+
+    <div id="notificationContainer" class="fixed top-4 right-4 z-[110] flex flex-col gap-2 no-print pointer-events-none"></div>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
