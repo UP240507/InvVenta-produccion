@@ -243,7 +243,6 @@ window.renderGraficoCategorias = function() {
     }, 100);
 };
 
-// ─── SINCRONIZADOR CSV ────────────────────────────────────────────────────────
 window.procesarCSVSoftRestaurant = async (input) => {
     const file = input.files[0];
     if (!file) return;
@@ -251,15 +250,18 @@ window.procesarCSVSoftRestaurant = async (input) => {
     const reader = new FileReader();
     reader.onload = async function(e) {
         const text = e.target.result;
-        const rows = text.split('\n'); 
+        const rows = text.split('\n');
         let procesados = 0; let errores = 0; let logErrores = [];
 
         showNotification('Analizando archivo...', 'info');
 
+        // ── FIX B-06: Acumular cambios en memoria antes de escribir ─────────
+        const cambios = new Map(); // productoId → { prod, totalDescuento, descripciones[] }
+
         for (let i = 1; i < rows.length; i++) {
-            const row = rows[i].split(','); 
-            const codigoSR = row[0] ? row[0].trim() : ''; 
-            const cantidad = parseFloat(row[2]); 
+            const row = rows[i].split(',');
+            const codigoSR = row[0] ? row[0].trim() : '';
+            const cantidad  = parseFloat(row[2]);
 
             if (!codigoSR || isNaN(cantidad)) continue;
 
@@ -269,28 +271,61 @@ window.procesarCSVSoftRestaurant = async (input) => {
                     const prod = DB.productos.find(p => p.id === ing.productoId);
                     if (prod) {
                         const desc = ing.cantidad * cantidad;
-                        await supabase.from('productos').update({ stock: prod.stock - desc }).eq('id', prod.id);
-                        await registrarMovimientoEnNube('Venta Externa', prod.id, -desc, `Sincronizado CSV: ${receta.nombre}`);
+                        const entry = cambios.get(prod.id) || { prod, totalDescuento: 0, descripciones: [] };
+                        entry.totalDescuento += desc;
+                        entry.descripciones.push(`${receta.nombre} x${cantidad}`);
+                        cambios.set(prod.id, entry);
                     }
                 }
                 procesados++;
             } else {
                 const producto = DB.productos.find(p => p.codigo === codigoSR);
                 if (producto) {
-                    await supabase.from('productos').update({ stock: producto.stock - cantidad }).eq('id', producto.id);
-                    await registrarMovimientoEnNube('Venta Externa', producto.id, -cantidad, `Sincronizado CSV: ${producto.nombre}`);
+                    const entry = cambios.get(producto.id) || { prod: producto, totalDescuento: 0, descripciones: [] };
+                    entry.totalDescuento += cantidad;
+                    entry.descripciones.push(`${producto.nombre} x${cantidad}`);
+                    cambios.set(producto.id, entry);
                     procesados++;
                 } else {
                     errores++; logErrores.push(codigoSR);
                 }
             }
         }
-        input.value = ''; 
-        await cargarDatosDeNube(); 
-        window.render();
 
-        if (procesados > 0) showNotification(`Éxito: ${procesados} ventas procesadas y descontadas del inventario.`, 'success');
-        if (errores > 0) alert(`Hubo ${errores} códigos en tu archivo que no existen en este sistema.\n\nEjemplos: ${logErrores.slice(0,3).join(', ')}\n\nAsegúrate de que el código POS sea idéntico en ambos sistemas.`);
+        if (procesados === 0) {
+            input.value = '';
+            if (errores > 0) alert(`No se procesó ningún producto.\n\nCódigos no encontrados: ${logErrores.slice(0,3).join(', ')}`);
+            else showNotification('El archivo no contiene datos válidos', 'error');
+            return;
+        }
+
+        // ── Aplicar todos los cambios en paralelo ────────────────────────────
+        try {
+            await Promise.all([...cambios.values()].map(async ({ prod, totalDescuento, descripciones }) => {
+                const nuevoStock = prod.stock - totalDescuento;
+                const { error } = await supabase.from('productos')
+                    .update({ stock: nuevoStock })
+                    .eq('id', prod.id);
+                if (error) throw new Error(`Error actualizando ${prod.nombre}: ${error.message}`);
+                await registrarMovimientoEnNube(
+                    'Venta Externa', prod.id, -totalDescuento,
+                    `Sincronizado CSV: ${descripciones.join(', ')}`
+                );
+            }));
+
+            input.value = '';
+            await cargarDatosDeNube();
+            window.render();
+
+            showNotification(`✅ ${procesados} ventas procesadas y descontadas del inventario.`, 'success');
+            if (errores > 0) alert(`Hubo ${errores} códigos en tu archivo que no existen en este sistema.\n\nEjemplos: ${logErrores.slice(0,3).join(', ')}\n\nAsegúrate de que el código POS sea idéntico en ambos sistemas.`);
+
+        } catch (err) {
+            console.error('Error aplicando cambios CSV:', err);
+            showNotification('Error al aplicar cambios: ' + err.message, 'error');
+            input.value = '';
+        }
+        // ─────────────────────────────────────────────────────────────────────
     };
     reader.readAsText(file);
 };

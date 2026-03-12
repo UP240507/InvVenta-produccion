@@ -1,6 +1,8 @@
 // src/components/Login.js
 import { AppState, DB } from '../store/state.js';
+import { supabase } from '../api/supabase.js';
 import { SPINNER_ICON, showNotification } from '../utils/helpers.js';
+import { verifyPassword, hashPassword, isHashed } from '../utils/auth.js';
 
 export function renderLogin() {
     const empresa = DB.configuracion?.nombreEmpresa || 'Stock Central';
@@ -56,38 +58,73 @@ export function renderLogin() {
     `;
 }
 
-// Hacemos global la función para que el onsubmit del HTML pueda llamarla
-window.handleLogin = function(e) {
+// ─── LOGIN HANDLER ────────────────────────────────────────────────────────────
+window.handleLogin = async function(e) {
     if (e) e.preventDefault();
-    
+
     const btn = document.getElementById('btn-login');
-    const originalText = btn.innerHTML;
-    btn.disabled = true; 
+    const originalHTML = btn.innerHTML;
+    btn.disabled = true;
     btn.innerHTML = `${SPINNER_ICON} Accediendo...`;
-    
-    setTimeout(() => {
-        const u = document.getElementById('login-u').value.trim();
-        const p = document.getElementById('login-p').value.trim();
-        
-        // Validación: Busca en DB o permite el acceso maestro (admin / 1234)
-        const user = DB.usuarios.find(x => x.username === u && x.password === p) 
-                  || (u === 'admin' && p === '1234' ? { id: 999, nombre: 'Admin Temporal', username: 'admin', rol: 'Admin', avatar: 'https://ui-avatars.com/api/?name=Admin' } : null);
-        
-        if (user) { 
-            AppState.user = user; 
-            // Cajero va directo al POS, los demás al dashboard
-            AppState.currentScreen = user.rol === 'Cajero' ? 'pos' : 'dashboard'; 
-            window.render(); 
-            showNotification(`¡Bienvenido, ${user.nombre}!`, 'success');
-        } else { 
-            showNotification('Usuario o contraseña incorrectos', 'error');
-            btn.disabled = false; 
-            btn.innerHTML = originalText;
+
+    const username = document.getElementById('login-u').value.trim();
+    const plainPassword = document.getElementById('login-p').value.trim();
+
+    // ── FIX B-02: La credencial maestra hardcodeada fue eliminada.
+    // Solo se aceptan usuarios registrados en la base de datos.
+    // Si necesitas un acceso de emergencia, crea un usuario Admin desde Supabase
+    // directamente con: INSERT INTO usuarios (nombre, username, password, rol)
+    // VALUES ('Admin', 'admin', '<hash_generado>', 'Admin');
+
+    // Buscar el usuario por username (sin comparar password aún)
+    const userRecord = DB.usuarios.find(x => x.username === username);
+
+    if (!userRecord) {
+        showNotification('Usuario o contraseña incorrectos', 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+        return;
+    }
+
+    // ── FIX B-01: Verificar contraseña con bcrypt
+    // verifyPassword maneja dos casos:
+    //   1. Hash bcrypt ($2a$...) — usuarios ya migrados → usa bcrypt.compare
+    //   2. Texto plano legacy → comparación directa + re-hash automático
+    const isValid = await verifyPassword(plainPassword, userRecord.password);
+
+    if (!isValid) {
+        showNotification('Usuario o contraseña incorrectos', 'error');
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
+        return;
+    }
+
+    // ── RE-HASH AUTOMÁTICO: Si el usuario tenía contraseña en texto plano,
+    // aprovechar este login para migrarla a bcrypt silenciosamente.
+    if (!isHashed(userRecord.password)) {
+        try {
+            const newHash = await hashPassword(plainPassword);
+            await supabase
+                .from('usuarios')
+                .update({ password: newHash })
+                .eq('id', userRecord.id);
+            // Actualizar en memoria también para consistencia
+            userRecord.password = newHash;
+            console.log(`✅ Contraseña de "${username}" migrada a bcrypt.`);
+        } catch (err) {
+            // No bloquear el login si el re-hash falla — solo loguear
+            console.warn('⚠️ Re-hash silencioso falló:', err.message);
         }
-    }, 600);
+    }
+
+    // Login exitoso
+    AppState.user = userRecord;
+    AppState.currentScreen = userRecord.rol === 'Cajero' ? 'pos' : 'dashboard';
+    window.render();
+    showNotification(`¡Bienvenido, ${userRecord.nombre}!`, 'success');
 };
 
-// ✅ Agregar el event listener después de renderizar
+// Adjuntar el event listener después de renderizar
 window.attachLoginEvents = function() {
     const form = document.getElementById('form-login');
     if (form) {

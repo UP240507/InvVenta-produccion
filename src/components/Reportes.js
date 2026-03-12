@@ -33,7 +33,7 @@ export function renderReportes() {
             </div>
             <p class="text-slate-500 mb-6 pl-12">Dinero congelado en almacén: <b class="text-emerald-600 text-xl ml-2">${formatCurrency(totalStock)}</b></p>
             <div class="overflow-x-auto rounded-xl border">
-                <table class="w-full text-sm text-left">
+                <table id="tablaReporte" class="w-full text-sm text-left">
                     <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b">
                         <tr><th class="p-4 font-bold">Código</th><th class="p-4 font-bold">Producto</th><th class="p-4 font-bold">Categoría</th><th class="p-4 text-center font-bold">Stock</th><th class="p-4 text-right font-bold">Costo Unit.</th><th class="p-4 text-right font-bold">Total</th></tr>
                     </thead>
@@ -67,7 +67,7 @@ export function renderReportes() {
             </div>
             <p class="text-slate-500 mb-6 pl-12">${start || end ? `Mostrando periodo del <b class="text-slate-700">${start||'Inicio'}</b> al <b class="text-slate-700">${end||'Hoy'}</b>` : 'Mostrando historial completo'}</p>
             <div class="overflow-x-auto rounded-xl border">
-                <table class="w-full text-sm text-left">
+                <table id="tablaReporte" class="w-full text-sm text-left">
                     <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b">
                         <tr><th class="p-4 font-bold">Fecha y Hora</th><th class="p-4 font-bold">Tipo</th><th class="p-4 font-bold">Producto</th><th class="p-4 text-center font-bold">Cant.</th><th class="p-4 font-bold">Ref / Motivo</th><th class="p-4 font-bold">Usuario</th></tr>
                     </thead>
@@ -115,7 +115,7 @@ export function renderReportes() {
             </div>
             
             <div class="overflow-x-auto rounded-xl border">
-                <table class="w-full text-sm text-left">
+                <table id="tablaReporte" class="w-full text-sm text-left">
                     <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b">
                         <tr><th class="p-4 font-bold text-center">Clasificación</th><th class="p-4 font-bold">Producto</th><th class="p-4 text-right font-bold">Valor Total</th><th class="p-4 text-right font-bold">% Acumulado</th></tr>
                     </thead>
@@ -151,7 +151,7 @@ export function renderReportes() {
             <div class="mb-8 h-72 w-full border rounded-xl p-4 bg-slate-50"><canvas id="graficoMermasReporte"></canvas></div>
             
             <div class="overflow-x-auto rounded-xl border">
-                <table class="w-full text-sm text-left">
+                <table id="tablaReporte" class="w-full text-sm text-left">
                     <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider border-b">
                         <tr><th class="p-4 font-bold">Fecha</th><th class="p-4 font-bold">Producto</th><th class="p-4 text-center font-bold">Cantidad</th><th class="p-4 text-right font-bold">Costo Perdido</th><th class="p-4 font-bold">Motivo</th></tr>
                     </thead>
@@ -246,7 +246,7 @@ export function renderReportes() {
                     <p class="text-lg font-bold text-slate-500">No hay ventas en este periodo</p>
                 </div>` : `
             <div class="overflow-x-auto rounded-xl border">
-                <table class="w-full text-sm text-left">
+                <table id="tablaReporte" class="w-full text-sm text-left">
                     <thead class="bg-slate-50 text-slate-500 uppercase text-[11px] tracking-wider font-bold border-b">
                         <tr>
                             <th class="p-4">Folio / Fecha</th>
@@ -432,7 +432,7 @@ export function renderReportes() {
                     ` : ''}
 
                     <div class="flex gap-2">
-                        <button onclick="window.exportarAExcel('Reporte_${tab}_${getSimpleDate()}')" class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-4 py-2.5 rounded-xl font-bold hover:bg-emerald-100 transition-colors flex items-center gap-2 text-xs">
+                        <button onclick="window.exportarAExcel('Reporte_${tab}_${getSimpleDate()}', '#tablaReporte')"
                             <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> <span class="hidden sm:inline">Excel</span>
                         </button>
                         <button onclick="window.print()" class="bg-rose-50 text-rose-700 border border-rose-200 px-4 py-2.5 rounded-xl font-bold hover:bg-rose-100 transition-colors flex items-center gap-2 text-xs">

@@ -2,6 +2,7 @@
 import { DB, AppState, cargarDatosDeNube } from '../store/state.js';
 import { supabase } from '../api/supabase.js';
 import { SPINNER_ICON, showNotification, abrirModalConfirmacion } from '../utils/helpers.js';
+import {hashPassword} from '../utils/auth.js'; // Importamos para asegurarnos de que el módulo se cargue, aunque no usemos funciones aquí directamente
 
 export function renderConfiguracion() {
     const conf = DB.configuracion || {};
@@ -495,8 +496,10 @@ window.eliminarMesa = async (id) => {
 };
 
 // ─── MODALES DE USUARIO ───────────────────────────────────────────────────────
+
 window.abrirModalUsuario = (id = null) => {
     const u = id ? DB.usuarios.find(x => x.id === id) : null;
+
     window.openModal(`
         <div class="p-8">
             <h2 class="text-2xl font-black text-slate-800 mb-6 flex items-center gap-2">
@@ -507,29 +510,43 @@ window.abrirModalUsuario = (id = null) => {
                 <input type="hidden" name="id" value="${u?.id || ''}">
                 <div>
                     <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Nombre Completo</label>
-                    <input name="nombre" value="${u?.nombre || ''}" required class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800">
+                    <input name="nombre" value="${u?.nombre || ''}" required
+                        class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800">
                 </div>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Usuario (Login ID)</label>
-                        <input name="username" value="${u?.username || ''}" required class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-600">
+                        <input name="username" value="${u?.username || ''}" required
+                            class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-600">
                     </div>
                     <div>
-                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Contraseña</label>
-                        <input name="password" type="text" value="${u?.password || ''}" required class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-600">
+                        <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">
+                            Contraseña ${u ? '<span class="text-slate-400 font-normal normal-case">(dejar vacío = no cambiar)</span>' : ''}
+                        </label>
+                    
+                        <input name="password" type="password" 
+    placeholder="${u ? 'Dejar vacío para no cambiar' : 'Nueva contraseña'}" 
+    ${u ? '' : 'required'}
+    class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-600">
                     </div>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Rol en el Sistema</label>
                     <select name="rol" class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-800 font-bold">
-                        <option value="Admin" ${u?.rol==='Admin'?'selected':''}>Administrador (Acceso Total)</option>
-                        <option value="Gerente" ${u?.rol==='Gerente'?'selected':''}>Gerente (Operación + Reportes)</option>
-                        <option value="Cajero" ${u?.rol==='Cajero'?'selected':''}>Cajero / Mesero (Solo Caja POS)</option>
+                        <option value="Admin"   ${u?.rol === 'Admin'   ? 'selected' : ''}>Administrador (Acceso Total)</option>
+                        <option value="Gerente" ${u?.rol === 'Gerente' ? 'selected' : ''}>Gerente (Operación + Reportes)</option>
+                        <option value="Cajero"  ${u?.rol === 'Cajero'  ? 'selected' : ''}>Cajero / Mesero (Solo Caja POS)</option>
                     </select>
                 </div>
                 <div class="pt-6 flex gap-3">
-                    <button type="button" onclick="window.closeModal()" class="flex-1 py-3 rounded-xl border border-slate-300 font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancelar</button>
-                    <button type="submit" class="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-200 transition-transform active:scale-95">Guardar Usuario</button>
+                    <button type="button" onclick="window.closeModal()"
+                        class="flex-1 py-3 rounded-xl border border-slate-300 font-bold text-slate-600 hover:bg-slate-50 transition-colors">
+                        Cancelar
+                    </button>
+                    <button type="submit"
+                        class="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-200 transition-transform active:scale-95">
+                        Guardar Usuario
+                    </button>
                 </div>
             </form>
         </div>
@@ -537,19 +554,65 @@ window.abrirModalUsuario = (id = null) => {
 
     document.getElementById('formUser').onsubmit = async (e) => {
         e.preventDefault();
+
+        const btn = e.target.querySelector('button[type="submit"]');
+        const originalHTML = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = SPINNER_ICON + ' Guardando...';
+
         const fd = new FormData(e.target);
         const datos = Object.fromEntries(fd.entries());
-        if(!u) datos.avatar = `https://ui-avatars.com/api/?name=${datos.nombre}&background=random&color=fff`;
-        if(datos.id) datos.id = parseInt(datos.id); else delete datos.id;
+
+        // Convertir id a número si existe
+        if (datos.id) {
+            datos.id = parseInt(datos.id);
+        } else {
+            delete datos.id;
+        }
+
+        // ── FIX B-08: Hashear la contraseña antes de guardar ─────────────
+        const plainPassword = datos.password;
+
+        if (plainPassword) {
+            // Hay contraseña nueva → hashear siempre
+            try {
+                datos.password = await hashPassword(plainPassword);
+            } catch (err) {
+                showNotification('Error al procesar contraseña: ' + err.message, 'error');
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+                return;
+            }
+        } else if (u) {
+            // Editando usuario existente y el campo quedó vacío → no cambiar contraseña
+            delete datos.password;
+        } else {
+            // Usuario nuevo sin contraseña → no debería llegar aquí por el `required`,
+            // pero como salvaguarda:
+            showNotification('La contraseña es obligatoria para usuarios nuevos', 'error');
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────
+
+        // Avatar autogenerado para usuarios nuevos
+        if (!u) {
+            datos.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(datos.nombre)}&background=random&color=fff`;
+        }
 
         try {
             const { error } = await supabase.from('usuarios').upsert(datos);
-            if(error) throw error;
+            if (error) throw error;
             await cargarDatosDeNube();
             window.closeModal();
             window.render();
             showNotification('Usuario guardado exitosamente', 'success');
-        } catch (err) { showNotification('Error al guardar: ' + err.message, 'error'); }
+        } catch (err) {
+            showNotification('Error al guardar: ' + err.message, 'error');
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+        }
     };
 };
 

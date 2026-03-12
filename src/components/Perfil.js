@@ -2,6 +2,7 @@
 import { DB, AppState, cargarDatosDeNube } from '../store/state.js';
 import { supabase } from '../api/supabase.js';
 import { showNotification, formatDate, SPINNER_ICON } from '../utils/helpers.js';
+import { hashPassword } from '../utils/auth.js';
 
 export function renderPerfil() {
     const u = AppState.user;
@@ -102,7 +103,9 @@ export function renderPerfil() {
                                 <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">Clave de Acceso</label>
                                 <div class="relative">
                                     <i data-lucide="key" class="absolute left-3.5 top-3.5 w-5 h-5 text-slate-400"></i>
-                                    <input name="password" type="password" value="${u.password}" class="w-full border-2 border-slate-200 pl-11 p-3 rounded-xl focus:border-blue-500 focus:ring-0 outline-none text-slate-800 font-mono tracking-widest transition-colors bg-slate-50 focus:bg-white">
+                                    <input name="password" type="password" 
+    placeholder="Nueva contraseña (dejar vacío para no cambiar)"
+    class="w-full border-2 border-slate-200 pl-11 p-3 rounded-xl focus:border-blue-500 focus:ring-0 outline-none text-slate-800 font-mono tracking-widest transition-colors bg-slate-50 focus:bg-white">
                                 </div>
                                 <p class="text-[10px] text-slate-400 mt-1.5 ml-1">Utilizada para ingresar al sistema desde la pantalla principal.</p>
                             </div>
@@ -168,51 +171,85 @@ window.subirImagenPerfil = async (input, tipo) => {
 };
 
 // ─── GUARDAR PERFIL EN BASE DE DATOS ─────────────────────────────────────────
+
 window.guardarPerfil = async (e) => {
     e.preventDefault();
+
     const btn = e.target.querySelector('button[type="submit"]');
-    const originalText = btn.innerHTML;
-    btn.disabled = true; 
+    const originalHTML = btn.innerHTML;
+    btn.disabled = true;
     btn.innerHTML = SPINNER_ICON + ' Guardando...';
 
     const fd = new FormData(e.target);
-    const nuevoNombre = fd.get('nombre').trim();
-    const nuevaPass = fd.get('password').trim();
-    
-    // Tomamos la imagen cargada o mantenemos la que ya tenía
-    let avatarFinal = AppState.tempData.newAvatar || AppState.user.avatar;
-    let portadaFinal = AppState.tempData.newPortada || AppState.user.portada || '';
+    const nuevoNombre    = fd.get('nombre').trim();
+    const plainPassword  = fd.get('password').trim(); // vacío si no quiso cambiarla
+
+    const avatarFinal  = AppState.tempData.newAvatar  || AppState.user.avatar;
+    const portadaFinal = AppState.tempData.newPortada || AppState.user.portada || '';
+
+    // ── FIX B-01: Hash de contraseña al guardar perfil ───────────────────
+    let passwordFinal;
+
+    if (plainPassword) {
+        // El usuario escribió una contraseña nueva → hashearla
+        try {
+            passwordFinal = await hashPassword(plainPassword);
+        } catch (err) {
+            showNotification('Error al procesar contraseña: ' + err.message, 'error');
+            btn.disabled = false;
+            btn.innerHTML = originalHTML;
+            return;
+        }
+    } else {
+        // Campo vacío → conservar la contraseña actual en DB (sin cambios)
+        passwordFinal = AppState.user.password;
+    }
+    // ─────────────────────────────────────────────────────────────────────
 
     try {
-        if(AppState.user.id === 999) {
-            AppState.user.nombre = nuevoNombre;
-            AppState.user.password = nuevaPass;
-            AppState.user.avatar = avatarFinal;
-            AppState.user.portada = portadaFinal;
-            showNotification('Perfil temporal actualizado (No se guarda en la nube)', 'info');
+        if (AppState.user.id === 999) {
+            // Usuario temporal (admin maestro eliminado en B-02 — este caso
+            // ya no debería ocurrir, pero se deja como fallback)
+            AppState.user.nombre   = nuevoNombre;
+            AppState.user.password = passwordFinal;
+            AppState.user.avatar   = avatarFinal;
+            AppState.user.portada  = portadaFinal;
+            showNotification('Perfil temporal actualizado (no se guarda en la nube)', 'info');
         } else {
-            const { error } = await supabase.from('usuarios').update({
-                nombre: nuevoNombre,
-                password: nuevaPass,
-                avatar: avatarFinal,
-                portada: portadaFinal
-            }).eq('id', AppState.user.id);
-            
-            if(error) throw error;
-            
+            const updateData = {
+                nombre:   nuevoNombre,
+                password: passwordFinal,
+                avatar:   avatarFinal,
+                portada:  portadaFinal,
+            };
+
+            // Si el usuario no cambió contraseña, no la mandamos al update
+            // para no pisar accidentalmente con la misma contraseña hasheada
+            if (!plainPassword) {
+                delete updateData.password;
+            }
+
+            const { error } = await supabase
+                .from('usuarios')
+                .update(updateData)
+                .eq('id', AppState.user.id);
+
+            if (error) throw error;
+
             await cargarDatosDeNube();
             AppState.user = DB.usuarios.find(x => x.id === AppState.user.id);
-            
-            // Limpiamos los temporales
-            AppState.tempData.newAvatar = null;
+
+            // Limpiar temporales de imagen
+            AppState.tempData.newAvatar  = null;
             AppState.tempData.newPortada = null;
-            
+
             showNotification('Perfil actualizado correctamente', 'success');
         }
+
         window.render();
     } catch (err) {
         showNotification('Error al actualizar: ' + err.message, 'error');
-        btn.disabled = false; 
-        btn.innerHTML = originalText;
+        btn.disabled = false;
+        btn.innerHTML = originalHTML;
     }
 };

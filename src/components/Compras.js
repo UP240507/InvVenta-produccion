@@ -18,6 +18,8 @@ window.imprimirOC = (id) => {
     const ordenes = DB.ordenes_compra || DB.ordenesCompra || [];
     const oc = ordenes.find(x => x.id === id);
     if (!oc) return;
+
+    
     
     const folio = oc.numero || `OC-00${oc.id}`;
     const prov = oc.proveedor || oc.proveedor_id || 'Proveedor Automático';
@@ -417,6 +419,20 @@ window.recibirOC = async (id, e) => {
     const ordenes = DB.ordenes_compra || DB.ordenesCompra || [];
     const orden = ordenes.find(x => x.id === id);
     if (!orden) return;
+
+    window.imprimirOC = (id) => {
+    const ordenes = DB.ordenes_compra || DB.ordenesCompra || [];
+    const oc = ordenes.find(x => x.id === id);
+    if (!oc) return;
+
+    if ((orden.estado || '').toLowerCase().trim() === 'recibida') {
+    showNotification('Esta orden ya fue recibida anteriormente', 'error');
+    btn.disabled = false;
+    btn.innerHTML = '<i data-lucide="download" class="w-5 h-5"></i> Recibir Mercancía';
+    if (window.lucide) window.lucide.createIcons();
+    return;
+    }
+}
 
     try {
         for (const item of (orden.items || [])) {

@@ -6,7 +6,7 @@ import { renderLogin } from './components/Login.js';
 import { renderDashboard } from './components/Dashboard.js';
 import { renderProductos } from './components/Products.js';
 import { renderProveedores } from './components/Proveedores.js';
-import { renderOrdenCompraForm, renderEntradasMercancia, /*renderNuevaCompra*/ } from './components/Compras.js';
+import { renderOrdenCompraForm, renderEntradasMercancia } from './components/Compras.js';
 import { renderAjustesInventario } from './components/Ajustes.js';
 import { renderRecetas } from './components/Recetas.js';
 import { renderReportes } from './components/Reportes.js';
@@ -15,11 +15,9 @@ import { renderPerfil } from './components/Perfil.js';
 import { renderPos } from './components/Pos.js';
 import { renderMesas } from './components/Mesas.js';
 
-// Exponemos las variables globales a "window" para que los "onclick" del HTML funcionen
 window.AppState = AppState;
 window.DB = DB;
 
-// Función para manejar los modales globales (Ventanas emergentes)
 window.openModal = function(content) {
     const root = document.getElementById('modal-root');
     root.innerHTML = `
@@ -35,107 +33,67 @@ window.closeModal = function() {
     document.getElementById('modal-root').innerHTML = '';
 };
 
-// El enrutador principal (Decide qué pintar en la pantalla)
 window.render = function() {
     const root = document.getElementById('root');
-    
-    // 1. Si NO hay usuario logueado, inyectamos el Login
+
     if (!AppState.user) {
         root.innerHTML = renderLogin();
         lucide.createIcons();
         const loginForm = document.getElementById('form-login');
-        if (loginForm) {
-            loginForm.addEventListener('submit', window.handleLogin);
-        }
-        return; // Detenemos la ejecución para que no cargue el menú
+        if (loginForm) loginForm.addEventListener('submit', window.handleLogin);
+        return;
     }
 
-    // 2. Si hay usuario, vemos qué pantalla solicitó
     let contenidoHTML = '';
-    
+
     switch(AppState.currentScreen) {
-        case 'dashboard': 
-            contenidoHTML = renderDashboard(); 
-            break;
-        case 'productos': 
-            contenidoHTML = renderProductos();
-            break;
-        case 'proveedores':
-            contenidoHTML = renderProveedores();
-            break;
-        case 'compras_crear': 
-            contenidoHTML = renderOrdenCompraForm(); 
-            break;
-        case 'entradas_mercancia': 
-            contenidoHTML = renderEntradasMercancia(); 
-            break;
-        case 'ajustes_inventario':
-            contenidoHTML = renderAjustesInventario();
-            break;
-        case 'recetas':
-            contenidoHTML = renderRecetas();
-            break;
-        case 'reportes':
-            contenidoHTML = renderReportes();
-            break;
-        case 'configuracion':
-            contenidoHTML = renderConfiguracion();
-            break;
-        case 'perfil':
-            contenidoHTML = renderPerfil();
-            break;
-        case 'mesas':
-            contenidoHTML = renderMesas();
-            break;
-        case 'pos':
-            contenidoHTML = renderPos();
-            break;
-        default: 
-            contenidoHTML = '<div class="text-center py-20 text-gray-400">Pantalla en construcción...</div>';
+        case 'dashboard':           contenidoHTML = renderDashboard();          break;
+        case 'productos':           contenidoHTML = renderProductos();           break;
+        case 'proveedores':         contenidoHTML = renderProveedores();         break;
+        case 'compras_crear':       contenidoHTML = renderOrdenCompraForm();     break;
+        case 'entradas_mercancia':  contenidoHTML = renderEntradasMercancia();   break;
+        case 'ajustes_inventario':  contenidoHTML = renderAjustesInventario();   break;
+        case 'recetas':             contenidoHTML = renderRecetas();             break;
+        case 'reportes':            contenidoHTML = renderReportes();            break;
+        case 'configuracion':       contenidoHTML = renderConfiguracion();       break;
+        case 'perfil':              contenidoHTML = renderPerfil();              break;
+        case 'mesas':               contenidoHTML = renderMesas();               break;
+        case 'pos':                 contenidoHTML = renderPos();                 break;
+        default: contenidoHTML = '<div class="text-center py-20 text-gray-400">Pantalla en construcción...</div>';
     }
 
-    // 3. Envolvemos el contenido en el Cascarón (Menú lateral y Header)
     root.innerHTML = renderLayout(contenidoHTML);
-    
-    // 4. Activamos los iconos de Lucide
     lucide.createIcons();
 
-    // 5. Lógica posterior al renderizado (Ej: Dibujar gráficas del dashboard)
-    if(AppState.currentScreen === 'dashboard') {
+    if (AppState.currentScreen === 'dashboard') {
         setTimeout(() => {
-            if(typeof window.renderGraficoCategorias === 'function') {
-                window.renderGraficoCategorias();
-            }
+            if (typeof window.renderGraficoCategorias === 'function') window.renderGraficoCategorias();
         }, 50);
     }
 };
 
-// Función de arranque
 async function iniciarApp() {
-    await cargarDatosDeNube(); // Traemos toda la info de Supabase
-    window.render(); // Pintamos la primera pantalla
+    await cargarDatosDeNube();
+    window.render();
 }
 
-// Arrancamos el motor
 iniciarApp();
 
-// ==========================================
+// ═══════════════════════════════════════════════════════════════════════
 // MOTOR LÁSER: LECTOR DE CÓDIGOS DE BARRAS
-// ==========================================
+// FIX: ignorar teclas cuando el foco está en un input/textarea/select
+// ═══════════════════════════════════════════════════════════════════════
 let barcodeBuffer = '';
 let barcodeTimer = null;
 
-// Le agregamos 'window.' a las funciones para evitar problemas de alcance (scope)
 window.procesarCodigoEscaneado = (codigo) => {
-    // En mesas, delegar al scanner de mesas
     if (AppState.currentScreen === 'mesas') {
         window.mesaScanner(codigo);
         return;
     }
 
-    // En el POS, el scanner busca por codigo_pos de recetas, no por codigo de productos
     if (AppState.currentScreen === 'pos') {
-        const receta = DB.recetas.find(r => 
+        const receta = DB.recetas.find(r =>
             (r.codigo_pos || '').toLowerCase() === codigo.toLowerCase()
         );
         if (receta) {
@@ -148,10 +106,8 @@ window.procesarCodigoEscaneado = (codigo) => {
     }
 
     const prod = DB.productos.find(p => p.codigo.toLowerCase() === codigo.toLowerCase());
-    
-    if (!prod) {
-        return showNotification('⚠️ Código no encontrado: ' + codigo, 'error');
-    }
+
+    if (!prod) return showNotification('⚠️ Código no encontrado: ' + codigo, 'error');
 
     if (AppState.currentScreen === 'compras_crear' && AppState.tempData.proveedor) {
         const ex = AppState.cart.find(x => x.productoId === prod.id);
@@ -161,7 +117,7 @@ window.procesarCodigoEscaneado = (codigo) => {
         showNotification(`🛒 +1 ${prod.nombre} agregado`, 'success');
     } else if (AppState.currentScreen === 'productos') {
         const searchInput = document.getElementById('txtSearch');
-        if(searchInput) {
+        if (searchInput) {
             searchInput.value = prod.codigo;
             AppState.searchTerm = prod.codigo;
             window.actualizarTablaProductos();
@@ -173,25 +129,27 @@ window.procesarCodigoEscaneado = (codigo) => {
 };
 
 document.addEventListener('keydown', (e) => {
-    // Protección extra: Si no hay evento o tecla válida, ignoramos
     if (!e || !e.key) return;
+
+    // ── FIX: Si el foco está en un campo de texto, el escáner NO interviene ──
+    const tag = document.activeElement?.tagName;
+    const isEditable = document.activeElement?.isContentEditable;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || isEditable) return;
+    // ─────────────────────────────────────────────────────────────────────────
 
     if (barcodeTimer) clearTimeout(barcodeTimer);
 
     if (e.key === 'Enter') {
         if (barcodeBuffer.length > 2) {
-            // Evitamos que afecte inputs si no estamos escribiendo intencionalmente
-            if(document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
-                e.preventDefault(); 
-            }
+            e.preventDefault();
             window.procesarCodigoEscaneado(barcodeBuffer);
         }
-        barcodeBuffer = ''; 
+        barcodeBuffer = '';
     } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey) {
         barcodeBuffer += e.key;
     }
 
-    barcodeTimer = setTimeout(() => { 
-        barcodeBuffer = ''; 
+    barcodeTimer = setTimeout(() => {
+        barcodeBuffer = '';
     }, 150);
 });

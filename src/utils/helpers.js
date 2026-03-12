@@ -1,9 +1,7 @@
 // src/utils/helpers.js
 import { supabase } from '../api/supabase.js';
 import { DB, AppState } from '../store/state.js';
-//import html2pdf from 'html2pdf.js';
 
-// Exportamos constantes visuales
 export const SPINNER_ICON = `<svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
 export const ITEMS_PER_PAGE = 8;
 
@@ -32,7 +30,7 @@ export async function registrarMovimientoEnNube(tipo, productoId, cantidad, refe
     const usuario = AppState.user ? AppState.user.nombre : 'Sistema';
     const prod = DB.productos.find(p => p.id === productoId);
     const stockAnt = prod ? prod.stock : 0;
-    const stockNuevo = stockAnt + cantidad; 
+    const stockNuevo = stockAnt + cantidad;
 
     const { error } = await supabase.from('movimientos').insert({
         tipo: tipo,
@@ -47,8 +45,6 @@ export async function registrarMovimientoEnNube(tipo, productoId, cantidad, refe
 
     if (error) console.error("Error guardando movimiento:", error);
 }
-
-// Agrega esto al final de src/utils/helpers.js
 
 export function renderPaginacion(totalItems, itemsPerPage, currentPage, screenKey) {
     const totalPages = Math.ceil(totalItems / itemsPerPage);
@@ -101,10 +97,9 @@ window.ejecutarConfirmacion = () => {
     window.closeModal();
 };
 
-// Agrega esto al final de src/utils/helpers.js
-
-export function exportarAExcel(filename) {
-    const table = document.querySelector('table');
+// ── FIX B-09: tableSelector específico en lugar de tomar la primera tabla del DOM ──
+export function exportarAExcel(filename, tableSelector = 'table') {
+    const table = document.querySelector(tableSelector);
     if (!table) return showNotification('No hay datos para exportar', 'error');
 
     let csv = [];
@@ -113,7 +108,7 @@ export function exportarAExcel(filename) {
     for (let i = 0; i < rows.length; i++) {
         let row = [], cols = rows[i].querySelectorAll("td, th");
         for (let j = 0; j < cols.length; j++) 
-            row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"'); // Escapar comillas
+            row.push('"' + cols[j].innerText.replace(/"/g, '""') + '"');
         csv.push(row.join(","));        
     }
 
@@ -124,10 +119,10 @@ export function exportarAExcel(filename) {
     downloadLink.style.display = "none";
     document.body.appendChild(downloadLink);
     downloadLink.click();
+    document.body.removeChild(downloadLink);
     showNotification('Reporte descargado con éxito', 'success');
 }
 
-// Globalizamos la función para que funcione en los botones del HTML
 window.exportarAExcel = exportarAExcel;
 
 export async function exportarAPDF(nombreReporte) {
@@ -143,25 +138,23 @@ export async function exportarAPDF(nombreReporte) {
         margin:       0.5,
         filename:     `${nombreReporte}_${getSimpleDate()}.pdf`,
         image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, useCORS: true }, 
+        html2canvas:  { scale: 2, useCORS: true },
         jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
     };
 
     try {
-        // Usamos la versión de window (CDN) que nunca falla con Vite
         await window.html2pdf().set(opciones).from(elemento).save();
         showNotification('PDF descargado con éxito', 'success');
     } catch (error) {
         console.error("Error al hacer el PDF:", error);
         showNotification('Hubo un error al generar el PDF.', 'error');
     } finally {
-        // Pase lo que pase, regresamos la pantalla a la normalidad
         encabezados.forEach(el => el.style.display = 'none');
     }
 }
 
 window.exportarAPDF = exportarAPDF;
-// ─── Detectar tipo de tarjeta por primeros dígitos ───────────────────────────
+
 export function detectarTipoTarjeta(numero) {
     const n = (numero || '').replace(/\D/g, '');
     if (/^4/.test(n)) return { tipo: 'Visa', icono: '💳', color: '#1a1f71' };

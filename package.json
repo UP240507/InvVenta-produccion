@@ -16,7 +16,9 @@
     "vite": "^7.3.1"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.97.0",
+    "@supabase/supabase-js": "^2.99.0",
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.3.1",
     "html2pdf.js": "^0.14.0"
   }
 }
