@@ -1,11 +1,8 @@
 // src/components/Login.js
-import { AppState, DB } from '../store/state.js';
-import { supabase } from '../api/supabase.js';
-import { SPINNER_ICON, showNotification } from '../utils/helpers.js';
-import { verifyPassword, hashPassword, isHashed } from '../utils/auth.js';
+import { DB } from '../store/state.js';
 
 export function renderLogin() {
-    const empresa = DB.configuracion?.nombreEmpresa || 'Stock Central';
+    const empresa = DB.configuracion?.nombreEmpresa || DB.configuracion?.nombre_empresa || 'Stock Central';
     const anio = new Date().getFullYear();
 
     return `
@@ -57,77 +54,3 @@ export function renderLogin() {
         </div>
     `;
 }
-
-// ─── LOGIN HANDLER ────────────────────────────────────────────────────────────
-window.handleLogin = async function(e) {
-    if (e) e.preventDefault();
-
-    const btn = document.getElementById('btn-login');
-    const originalHTML = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = `${SPINNER_ICON} Accediendo...`;
-
-    const username = document.getElementById('login-u').value.trim();
-    const plainPassword = document.getElementById('login-p').value.trim();
-
-    // ── FIX B-02: La credencial maestra hardcodeada fue eliminada.
-    // Solo se aceptan usuarios registrados en la base de datos.
-    // Si necesitas un acceso de emergencia, crea un usuario Admin desde Supabase
-    // directamente con: INSERT INTO usuarios (nombre, username, password, rol)
-    // VALUES ('Admin', 'admin', '<hash_generado>', 'Admin');
-
-    // Buscar el usuario por username (sin comparar password aún)
-    const userRecord = DB.usuarios.find(x => x.username === username);
-
-    if (!userRecord) {
-        showNotification('Usuario o contraseña incorrectos', 'error');
-        btn.disabled = false;
-        btn.innerHTML = originalHTML;
-        return;
-    }
-
-    // ── FIX B-01: Verificar contraseña con bcrypt
-    // verifyPassword maneja dos casos:
-    //   1. Hash bcrypt ($2a$...) — usuarios ya migrados → usa bcrypt.compare
-    //   2. Texto plano legacy → comparación directa + re-hash automático
-    const isValid = await verifyPassword(plainPassword, userRecord.password);
-
-    if (!isValid) {
-        showNotification('Usuario o contraseña incorrectos', 'error');
-        btn.disabled = false;
-        btn.innerHTML = originalHTML;
-        return;
-    }
-
-    // ── RE-HASH AUTOMÁTICO: Si el usuario tenía contraseña en texto plano,
-    // aprovechar este login para migrarla a bcrypt silenciosamente.
-    if (!isHashed(userRecord.password)) {
-        try {
-            const newHash = await hashPassword(plainPassword);
-            await supabase
-                .from('usuarios')
-                .update({ password: newHash })
-                .eq('id', userRecord.id);
-            // Actualizar en memoria también para consistencia
-            userRecord.password = newHash;
-            console.log(`✅ Contraseña de "${username}" migrada a bcrypt.`);
-        } catch (err) {
-            // No bloquear el login si el re-hash falla — solo loguear
-            console.warn('⚠️ Re-hash silencioso falló:', err.message);
-        }
-    }
-
-    // Login exitoso
-    AppState.user = userRecord;
-    AppState.currentScreen = userRecord.rol === 'Cajero' ? 'pos' : 'dashboard';
-    window.render();
-    showNotification(`¡Bienvenido, ${userRecord.nombre}!`, 'success');
-};
-
-// Adjuntar el event listener después de renderizar
-window.attachLoginEvents = function() {
-    const form = document.getElementById('form-login');
-    if (form) {
-        form.addEventListener('submit', window.handleLogin);
-    }
-};

@@ -1,6 +1,7 @@
 // src/components/Mesas.js
 import { DB, AppState, cargarDatosDeNube } from '../store/state.js';
 import { supabase } from '../api/supabase.js';
+import { puedeCobrar } from './Layout.js';
 import { formatCurrency, showNotification, SPINNER_ICON, registrarMovimientoEnNube } from '../utils/helpers.js';
 
 // ─── Estado local del módulo de mesas ────────────────────────────────────────
@@ -65,7 +66,10 @@ function formatTiempo(mins) {
 function verificarStockMesa(receta, cantidad) {
     for (const ing of (receta.ingredientes || [])) {
         const prod = DB.productos.find(p => String(p.id) === String(ing.productoId));
-        if (!prod || prod.stock < ing.cantidad * cantidad)
+        const merma = parseFloat(ing.merma) || 0;
+        const rendimiento = Math.max(0.01, 1 - (merma / 100));
+        const cantidadBrutaRequerida = (ing.cantidad / rendimiento) * cantidad;
+        if (!prod || prod.stock < cantidadBrutaRequerida)
             return { ok: false, nombre: prod?.nombre || 'Ingrediente desconocido' };
     }
     return { ok: true };
@@ -116,7 +120,6 @@ function renderMapaMesas() {
     return `
         <div class="space-y-6 animate-fade-in pb-20 mt-4 max-w-6xl mx-auto">
 
-            <!-- Resumen rápido -->
             <div class="grid grid-cols-3 gap-4">
                 <div class="bg-white rounded-2xl border shadow-sm p-4 flex items-center gap-3">
                     <div class="bg-green-100 p-2.5 rounded-xl"><i data-lucide="circle-check" class="w-5 h-5 text-green-600"></i></div>
@@ -132,7 +135,6 @@ function renderMapaMesas() {
                 </div>
             </div>
 
-            <!-- Zonas -->
             ${zonas.map(zona => {
                 const mesasZona = mesas.filter(m => (m.zona || 'General') === zona);
                 return `
@@ -243,36 +245,40 @@ window.mesaMostrarOpciones = (mesa) => {
                     `).join('')}
                 </div>` : ''}
             <div class="grid grid-cols-1 gap-2">
-                <button type="button" onclick="window.mesaIrAlPos('${mesa.id}'); closeModal()"
-                    class="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 flex items-center justify-center gap-2 active:scale-95">
-                    <i data-lucide="plus-circle" class="w-5 h-5"></i> Agregar platillos
-                </button>
-                ${!porCobrar ? `
-                <button type="button" onclick="window.mesaMarcarPorCobrar('${mesa.id}'); closeModal()"
-                    class="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 flex items-center justify-center gap-2 active:scale-95">
-                    <i data-lucide="receipt" class="w-5 h-5"></i> Solicitar cuenta impresa
-                </button>` : ''}
-                <div class="grid grid-cols-2 gap-2 mt-2">
-                    <button type="button" onclick="window.mesaIrACobrar('${mesa.id}'); closeModal()"
-                        class="bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 active:scale-95">
-                        <i data-lucide="banknote" class="w-5 h-5"></i> Cobrar Todo
-                    </button>
-                    <button type="button" onclick="window.mesaDividirCuenta('${mesa.id}'); closeModal()"
-                        class="bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 flex items-center justify-center gap-2 shadow-lg shadow-purple-600/20 active:scale-95">
-                        <i data-lucide="split" class="w-5 h-5"></i> Dividir
-                    </button>
-                </div>
-                <div class="grid grid-cols-2 gap-2 mt-2">
-                    <button type="button" onclick="window.mesaTransferir('${mesa.id}')"
-                        class="bg-blue-50 text-blue-600 border border-blue-200 py-2.5 rounded-xl font-bold text-sm hover:bg-blue-100 flex items-center justify-center gap-1">
-                        <i data-lucide="arrow-right-left" class="w-4 h-4"></i> Transferir
-                    </button>
-                    <button type="button" onclick="window.mesaCerrarVacia('${mesa.id}')"
-                        class="bg-red-50 text-red-500 border border-red-200 py-2.5 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-1">
-                        <i data-lucide="x-circle" class="w-4 h-4"></i> Cancelar
-                    </button>
-                </div>
-            </div>
+    <button type="button" onclick="window.mesaIrAlPos('${mesa.id}'); closeModal()"
+        class="w-full bg-slate-800 text-white py-3 rounded-xl font-bold hover:bg-slate-700 flex items-center justify-center gap-2 active:scale-95">
+        <i data-lucide="plus-circle" class="w-5 h-5"></i> Agregar platillos
+    </button>
+    
+    ${!porCobrar ? `
+    <button type="button" onclick="window.mesaMarcarPorCobrar('${mesa.id}'); closeModal()"
+        class="w-full bg-amber-500 text-white py-3 rounded-xl font-bold hover:bg-amber-600 flex items-center justify-center gap-2 active:scale-95">
+        <i data-lucide="receipt" class="w-5 h-5"></i> Solicitar cuenta impresa
+    </button>` : ''}
+
+    ${puedeCobrar() ? `
+    <div class="grid grid-cols-2 gap-2 mt-2">
+        <button type="button" onclick="window.mesaIrACobrar('${mesa.id}'); closeModal()"
+            class="bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 flex items-center justify-center gap-2 shadow-lg shadow-green-600/20 active:scale-95">
+            <i data-lucide="banknote" class="w-5 h-5"></i> Cobrar Todo
+        </button>
+        <button type="button" onclick="window.mesaDividirCuenta('${mesa.id}'); closeModal()"
+            class="bg-purple-600 text-white py-3 rounded-xl font-bold hover:bg-purple-700 flex items-center justify-center gap-2 shadow-lg shadow-purple-600/20 active:scale-95">
+            <i data-lucide="split" class="w-5 h-5"></i> Dividir
+        </button>
+    </div>` : ''}
+    
+    <div class="grid grid-cols-2 gap-2 mt-2">
+        <button type="button" onclick="window.mesaTransferir('${mesa.id}')"
+            class="bg-blue-50 text-blue-600 border border-blue-200 py-2.5 rounded-xl font-bold text-sm hover:bg-blue-100 flex items-center justify-center gap-1">
+            <i data-lucide="arrow-right-left" class="w-4 h-4"></i> Transferir
+        </button>
+        <button type="button" onclick="window.mesaCerrarVacia('${mesa.id}')"
+            class="bg-red-50 text-red-500 border border-red-200 py-2.5 rounded-xl font-bold text-sm hover:bg-red-100 flex items-center justify-center gap-1">
+            <i data-lucide="x-circle" class="w-4 h-4"></i> Cancelar
+        </button>
+    </div>
+</div>
         </div>
     `);
     if (window.lucide) window.lucide.createIcons();
@@ -286,7 +292,11 @@ window.mesaIrAlPos = async (mesaId) => {
     mesaState.mesaActiva = mesa;
     mesaState.orden = (ordenGuardada.items || []).map(i => ({
         receta: DB.recetas.find(r => String(r.id) === String(i.recetaId)) || { id: i.recetaId, nombre: i.nombre, ingredientes: [] },
-        cantidad: i.cantidad, precioUnit: i.precio, subtotal: i.subtotal, nota: i.nota || ''
+        cantidad: i.cantidad, 
+        precioUnit: i.precio, 
+        subtotal: i.subtotal, 
+        nota: i.nota || '',
+        servido: i.servido || false // <-- ESTO ES LO NUEVO
     })).filter(i => i.receta);
     mesaState.itemsEnviados = ordenGuardada.items_enviados || [];
     mesaState.descuento = 0; mesaState.propina = 0;
@@ -360,7 +370,7 @@ window.mesaConfirmarTransferir = async (origenId, destinoId) => {
     } catch (err) { showNotification('Error al transferir: ' + err.message, 'error'); }
 };
 
-// ─── POS DE MESA ──────────────────────────────────────────────────────────────
+// ─── POS DE MESA (REDISEÑO RESPONSIVO MOBILE-FIRST) ──────────────────────────
 function renderPosMesa() {
     const mesa = mesaState.mesaActiva;
     const categorias = [...new Set(DB.recetas.map(r => r.categoria || 'Sin categoría'))];
@@ -372,12 +382,10 @@ function renderPosMesa() {
     }, 100);
 
     return `
-    <div class="flex flex-col lg:flex-row gap-4 animate-fade-in h-[calc(100vh-100px)] min-h-[500px]">
+    <div class="flex flex-col lg:flex-row gap-4 animate-fade-in lg:h-[calc(100vh-100px)] lg:min-h-[500px]">
 
-        <!-- ── Columna izquierda: catálogo ── -->
-        <div class="flex-1 flex flex-col gap-3 min-w-0 min-h-0">
+        <div class="flex-1 flex flex-col gap-3 min-w-0 min-h-[50vh] lg:min-h-0 lg:overflow-hidden">
 
-            <!-- Header mesa -->
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-3 flex items-center justify-between flex-none">
                 <div class="flex items-center gap-4">
                     <button type="button" onclick="window.mesaVolverAlMapa()" class="p-2 hover:bg-slate-100 rounded-xl border border-slate-200 shadow-sm transition-colors">
@@ -391,7 +399,6 @@ function renderPosMesa() {
                 <span class="bg-red-100 text-red-600 text-[10px] font-black px-3 py-1.5 rounded-md uppercase tracking-widest hidden sm:inline-block">Ocupada</span>
             </div>
 
-            <!-- Búsqueda y categorías -->
             <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 flex gap-3 items-center flex-wrap flex-none">
                 <div class="relative flex-1 min-w-[200px]">
                     <input id="mesaBusqueda"
@@ -416,17 +423,13 @@ function renderPosMesa() {
                 </div>
             </div>
 
-            <!-- Grid platillos -->
             <div id="mesaGridRecetas" class="flex-1 overflow-y-auto custom-scrollbar pr-1">
                 <div class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3 pb-4"></div>
             </div>
         </div>
 
-        <!-- ── Columna derecha: comanda ── -->
-        <div class="w-full lg:w-[380px] xl:w-[420px] flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-             style="height: min(65vh, calc(100vh - 140px)); min-height: 400px; max-height: calc(100vh - 120px);">
+        <div class="w-full lg:w-[380px] xl:w-[420px] flex-none lg:flex-initial flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm lg:overflow-hidden lg:h-full">
 
-            <!-- Header comanda -->
             <div class="bg-slate-900 px-5 py-4 flex items-center justify-between flex-none">
                 <div>
                     <h3 class="text-white font-black text-lg leading-tight">La Comanda</h3>
@@ -437,13 +440,11 @@ function renderPosMesa() {
                 </button>
             </div>
 
-            <!-- Items -->
-            <div id="mesaOrdenItems" class="flex-1 overflow-y-auto px-3 py-3 space-y-2 bg-slate-50/50 custom-scrollbar"></div>
+            <div id="mesaOrdenItems" class="flex-1 overflow-y-auto max-h-[35vh] lg:max-h-none px-3 py-3 space-y-2 bg-slate-50/50 custom-scrollbar min-h-[150px]">
+                </div>
 
-            <!-- Panel inferior fijo -->
-            <div class="flex-none border-t border-slate-200 bg-white">
+            <div class="flex-none border-t border-slate-200 bg-white flex flex-col">
 
-                <!-- Descuento / Propina -->
                 <div class="grid grid-cols-2 gap-2 p-3 bg-slate-50 border-b border-slate-100">
                     <div class="flex items-center bg-white border border-slate-200 rounded-xl p-2 focus-within:ring-2 focus-within:ring-orange-400 transition-shadow">
                         <span class="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 flex-1">Desc %</span>
@@ -459,7 +460,6 @@ function renderPosMesa() {
                     </div>
                 </div>
 
-                <!-- Totales -->
                 <div class="px-4 py-3 space-y-1 text-sm bg-white border-b border-slate-100">
                     <div class="flex justify-between text-slate-500 font-medium"><span>Subtotal</span><span id="mesaSubtotal">$0.00</span></div>
                     <div id="mesaDescuentoRow" class="flex justify-between text-red-500 text-xs font-bold hidden"><span>Descuento</span><span id="mesaDescuentoTotal">−$0.00</span></div>
@@ -469,18 +469,15 @@ function renderPosMesa() {
                     </div>
                 </div>
 
-                <!-- Método de pago -->
                 <div class="px-4 py-3 bg-slate-50 border-b border-slate-200">
                     <div class="grid grid-cols-3 gap-2 mb-2">
                         <button type="button" onclick="mesaState.metodoPago='efectivo'; window.mesaActualizarOrden(true)" id="mesaBtnEfectivo" class="py-2.5 rounded-xl text-xs font-black border transition-all">EFECTIVO</button>
                         <button type="button" onclick="mesaState.metodoPago='tarjeta'; window.mesaActualizarOrden(true)" id="mesaBtnTarjeta" class="py-2.5 rounded-xl text-xs font-black border transition-all">TARJETA</button>
                         <button type="button" onclick="mesaState.metodoPago='mixto'; window.mesaActualizarOrden(true)" id="mesaBtnMixto" class="py-2.5 rounded-xl text-xs font-black border transition-all">MIXTO</button>
                     </div>
-                    <!-- FIX: campos de pago en div separado → no destruye inputs de notas -->
                     <div id="mesaCamposPago"></div>
                 </div>
 
-                <!-- Botones de acción -->
                 <div class="p-3 bg-white space-y-2">
                     <button type="button" onclick="window.mesaEnviarComanda()" id="btnComanda"
                         class="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-xl font-bold text-sm shadow-md active:scale-95 flex items-center justify-center gap-2">
@@ -495,10 +492,15 @@ function renderPosMesa() {
                             class="bg-purple-50 border-2 border-purple-200 text-purple-700 py-2.5 rounded-xl font-bold text-xs hover:border-purple-400 flex flex-col items-center justify-center gap-0.5">
                             <i data-lucide="split" class="w-4 h-4"></i> Dividir
                         </button>
-                        <button type="button" onclick="window.mesaCobrar()"
-                            class="bg-orange-500 hover:bg-orange-600 text-white py-2.5 rounded-xl font-black text-xs shadow-md shadow-orange-500/30 active:scale-95 flex flex-col items-center justify-center gap-0.5">
-                            <i data-lucide="banknote" class="w-4 h-4"></i> Cobrar
-                        </button>
+                        ${puedeCobrar() ? `
+<button type="button" onclick="window.mesaCobrar()"
+    class="bg-orange-500 ...">
+    <i data-lucide="banknote"></i> Cobrar
+</button>` : `
+<button type="button" disabled
+    class="bg-slate-100 text-slate-400 py-2.5 rounded-xl font-black text-xs cursor-not-allowed flex flex-col items-center justify-center gap-0.5 border-2 border-slate-200">
+    <i data-lucide="lock" class="w-4 h-4"></i> Solo Cajero
+</button>`}
                     </div>
                 </div>
             </div>
@@ -581,18 +583,14 @@ window.mesaAgregarReceta = (id) => {
     if (!check.ok) return showNotification(`⚠️ Stock insuficiente de: ${check.nombre}`, 'error');
     if (existente) { existente.cantidad++; existente.subtotal = existente.cantidad * existente.precioUnit; }
     else mesaState.orden.push({ receta, cantidad: 1, precioUnit: receta.precio_venta || 0, subtotal: receta.precio_venta || 0, nota: '' });
-    // Al agregar platillo SÍ reconstruimos items
     window.mesaActualizarOrden(false);
     window.mesaActualizarGrid();
 };
 
 // ─── Actualizar orden ─────────────────────────────────────────────────────────
-// FIX: skipItems=true → solo actualiza totales y campos de pago,
-// NO reconstruye los items → los inputs de nota NO pierden el foco.
 window.mesaActualizarOrden = (skipItems = false) => {
     const { subtotal, descuentoAmt, propinaAmt, total } = calcTotalesMesa();
 
-    // ── Reconstruir items solo cuando cambia la lista ──
     if (!skipItems) {
         const itemsDiv = document.getElementById('mesaOrdenItems');
         if (itemsDiv) {
@@ -620,7 +618,7 @@ window.mesaActualizarOrden = (skipItems = false) => {
                         </div>
                         <div class="flex items-center gap-2 mt-1">
                             <div class="relative flex-1">
-                                <i data-lucide="message-square-edit" class="absolute left-2 top-1.5 w-3.5 h-3.5 text-orange-400 pointer-events-none"></i>
+                                <i data-lucide="edit-2" class="absolute left-2 top-1.5 w-3.5 h-3.5 text-orange-400 pointer-events-none"></i>
                                 <input type="text" placeholder="Nota a cocina (ej. sin tomate)"
                                     value="${item.nota || ''}"
                                     oninput="mesaState.orden[${idx}].nota = this.value"
@@ -639,7 +637,6 @@ window.mesaActualizarOrden = (skipItems = false) => {
         }
     }
 
-    // ── Totales — solo textContent, no tocan el DOM ──
     const set = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
     set('mesaSubtotal', formatCurrency(subtotal));
     set('mesaTotal', formatCurrency(total));
@@ -651,7 +648,6 @@ window.mesaActualizarOrden = (skipItems = false) => {
     if (descRow) descRow.classList.toggle('hidden', descuentoAmt === 0);
     if (propRow) propRow.classList.toggle('hidden', propinaAmt === 0);
 
-    // ── Botones método de pago ──
     const colores = {
         efectivo: 'bg-green-500 text-white border-green-600 shadow-md shadow-green-500/30',
         tarjeta:  'bg-blue-600 text-white border-blue-700 shadow-md shadow-blue-600/30',
@@ -662,7 +658,6 @@ window.mesaActualizarOrden = (skipItems = false) => {
         if (btn) btn.className = `py-2.5 rounded-xl text-xs font-black tracking-widest uppercase border transition-all ${mesaState.metodoPago===m ? colores[m] : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`;
     });
 
-    // ── Campos de pago en div separado (no afecta inputs de notas) ──
     const camposPago = document.getElementById('mesaCamposPago');
     const focusEnPago = camposPago && camposPago.contains(document.activeElement);
 
@@ -708,7 +703,6 @@ window.mesaActualizarOrden = (skipItems = false) => {
     }
 };
 
-
 window.mesaQuitarUno = (idx) => {
     if (mesaState.orden[idx].cantidad <= 1) mesaState.orden.splice(idx, 1);
     else { mesaState.orden[idx].cantidad--; mesaState.orden[idx].subtotal = mesaState.orden[idx].cantidad * mesaState.orden[idx].precioUnit; }
@@ -739,7 +733,15 @@ window.mesaGuardarYVolver = async () => {
     try {
         const { total } = calcTotalesMesa();
         const ordenParaGuardar = {
-            items: mesaState.orden.map(i => ({ recetaId: i.receta.id, nombre: i.receta.nombre, cantidad: i.cantidad, precio: i.precioUnit, subtotal: i.subtotal, nota: i.nota || '' })),
+            items: mesaState.orden.map(i => ({ 
+                recetaId: i.receta.id, 
+                nombre: i.receta.nombre, 
+                cantidad: i.cantidad, 
+                precio: i.precioUnit, 
+                subtotal: i.subtotal, 
+                nota: i.nota || '',
+                servido: i.servido || false // <-- ESTO ES LO NUEVO
+            })),
             items_enviados: mesaState.itemsEnviados, total
         };
         const { error } = await supabase.from('mesas').update({
@@ -835,42 +837,45 @@ window.mesaConfirmarCobro = async () => {
     const { total, subtotal, descuentoAmt, propinaAmt } = calcTotalesMesa();
     const folio = `MESA-${mesaState.mesaActiva.nombre.replace(/\s/g,'-')}-${Date.now().toString().slice(-5)}`;
     try {
-        // ── FIX B-03: Verificación final de stock antes de tocar nada ──────
         await cargarDatosDeNube();
         for (const item of mesaState.orden) {
             const check = verificarStockMesa(item.receta, item.cantidad);
             if (!check.ok) throw new Error(`Stock insuficiente de: ${check.nombre}`);
         }
-        // ────────────────────────────────────────────────────────────────────
 
         const productosAfectados = new Map();
-        for (const item of mesaState.orden)
-            for (const ing of (item.receta.ingredientes || []))
-                productosAfectados.set(ing.productoId, (productosAfectados.get(ing.productoId)||0) + (ing.cantidad * item.cantidad));
+        for (const item of mesaState.orden) {
+            for (const ing of (item.receta.ingredientes || [])) {
+                const merma = parseFloat(ing.merma) || 0;
+                const rendimiento = Math.max(0.01, 1 - (merma / 100));
+                const cantidadBrutaRequerida = (ing.cantidad / rendimiento) * item.cantidad;
+                productosAfectados.set(ing.productoId, (productosAfectados.get(ing.productoId) || 0) + cantidadBrutaRequerida);
+            }
+        }
 
-        // ── FIX B-03: Todos los updates de stock en paralelo ──────────────
-        await Promise.all([...productosAfectados].map(async ([productoId, cantDescuento]) => {
-            const prod = DB.productos.find(p => String(p.id) === String(productoId));
-            if (!prod) throw new Error(`Producto ${productoId} no encontrado`);
-            const { error } = await supabase.from('productos').update({ stock: prod.stock - cantDescuento }).eq('id', productoId);
-            if (error) throw error;
-            await registrarMovimientoEnNube('Salida POS', productoId, -cantDescuento, `Venta ${folio}`);
-        }));
-        // ─────────────────────────────────────────────────────────────────
-
-        try {
-            await supabase.from('ventas').insert({
-                folio,
-                items: mesaState.orden.map(i => ({ recetaId: i.receta.id, nombre: i.receta.nombre, cantidad: i.cantidad, precio: i.precioUnit, nota: i.nota||'' })),
-                subtotal, descuento: mesaState.descuento, descuento_monto: descuentoAmt,
-                propina: propinaAmt, total, metodo_pago: mesaState.metodoPago,
-                efectivo: mesaState.efectivoPagado, tarjeta: mesaState.tarjetaPagado,
-                mesa: mesaState.mesaActiva.nombre, usuario: AppState.user?.nombre||'Sistema',
-                fecha: new Date().toISOString()
+        for (const [productoId, cantDescuento] of productosAfectados) {
+            const { error } = await supabase.rpc('decrementar_stock', {
+                p_producto_id: productoId,
+                p_delta: Number(cantDescuento.toFixed(4)),
+                p_referencia: `Venta ${folio}`,
+                p_usuario: AppState.user?.nombre || 'Sistema',
+                p_tipo: 'Salida POS'
             });
-        } catch(_) {}
+            if (error) throw error;
+        }
 
-        await supabase.from('mesas').update({ estado:'libre', orden_actual:null, abierta_en:null, usuario:null, total_acumulado:0 }).eq('id', mesaState.mesaActiva.id);
+        await supabase.from('ventas').insert({
+            folio,
+            items: mesaState.orden.map(i => ({ recetaId: i.receta.id, nombre: i.receta.nombre, cantidad: i.cantidad, precio: i.precioUnit, nota: i.nota||'' })),
+            subtotal, descuento: mesaState.descuento, descuento_monto: descuentoAmt,
+            propina: propinaAmt, total, metodo_pago: mesaState.metodoPago,
+            efectivo: mesaState.efectivoPagado, tarjeta: mesaState.tarjetaPagado,
+            mesa: mesaState.mesaActiva.nombre, usuario: AppState.user?.nombre||'Sistema',
+            fecha: new Date().toISOString()
+        });
+
+        const { error: mesaError } = await supabase.from('mesas').update({ estado:'libre', orden_actual:null, abierta_en:null, usuario:null, total_acumulado:0 }).eq('id', mesaState.mesaActiva.id);
+        if (mesaError) throw mesaError;
         await cargarDatosDeNube();
 
         window.mesaImprimirTicket(folio, total, subtotal, descuentoAmt, propinaAmt);

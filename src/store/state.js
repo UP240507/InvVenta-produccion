@@ -1,111 +1,420 @@
 // src/store/state.js
 import { supabase } from '../api/supabase.js';
+import Dexie from 'https://cdn.jsdelivr.net/npm/dexie@3.2.4/dist/dexie.mjs';
 
-// Estructura reactiva que almacena los datos descargados
-export let DB = {
-    configuracion: { nombreEmpresa: 'Cargando...', iva: 0.16 },
-    categorias: ['Carnes', 'Lácteos', 'Verduras', 'Abarrotes', 'Bebidas', 'Especias', 'Otros'],
-    unidades: ['kg', 'L', 'pz', 'g', 'ml', 'caja', 'paq'],
-    usuarios: [],
-    productos: [],
-    proveedores: [],
-    recetas: [],
-    ordenesCompra: [],
-    movimientos: [],
-    ventas: [],
-    mesas: []
-};
+// ─── 1. INICIALIZAR BASE DE DATOS LOCAL (OFFLINE) ────────────────────────────
+export const localDB = new Dexie('StockCentralDB');
 
-// El estado de la pantalla actual y del usuario
+// Definimos las tablas locales. '++id' en sync_queue significa Autoincrementable.
+localDB.version(1).stores({
+    configuracion: 'id',
+    productos: 'id',
+    recetas: 'id',
+    mesas: 'id',
+    ventas: 'id',
+    movimientos: 'id',
+    ordenes_compra: 'id',
+    usuarios: 'id',
+    turnos: 'id',
+    sync_queue: '++id, tabla, metodo, fecha'
+});
+
+localDB.version(2).stores({
+    configuracion: 'id',
+    productos: 'id',
+    recetas: 'id',
+    mesas: 'id',
+    ventas: 'id',
+    movimientos: 'id',
+    ordenes_compra: 'id',
+    proveedores: 'id',
+    usuarios: 'id',
+    turnos: 'id',
+    sync_queue: '++id, tabla, metodo, fecha'
+});
+
+localDB.version(3).stores({
+    configuracion: 'id',
+    productos: 'id',
+    recetas: 'id',
+    mesas: 'id',
+    ventas: 'id',
+    movimientos: 'id',
+    ordenes_compra: 'id',
+    proveedores: 'id',
+    usuarios: 'id',
+    turnos: 'id',
+    sync_queue: '++id, tabla, metodo, estado, fecha, createdAt'
+});
+
+// ─── 2. ESTADO GLOBAL DE LA APLICACIÓN ───────────────────────────────────────
 export const AppState = {
     user: null,
     currentScreen: 'login',
-    cart: [],
-    tempData: {},
     isSidebarOpen: false,
-    searchTerm: '',
-    filterCategory: '',
-    reporteActivo: 'valorizacion',
-    productosPage: 1,
-    movimientosPage: 1,
-    reportDateStart: '',
-    reportDateEnd: ''
+    turnoActivo: null,
+    isOffline: !navigator.onLine,
+    tempData: {},
+    cart: [],
+    searchTerm: ''
 };
 
-// Función para sincronizar datos con la nube
-export async function cargarDatosDeNube() {
-    console.log("Descargando datos de Supabase...");
+export const DB = {
+    configuracion: {},
+    productos: [],
+    recetas: [],
+    mesas: [],
+    ventas: [],
+    movimientos: [],
+    ordenesCompra: [],
+    proveedores: [],
+    usuarios: [],
+    turnos: []
+};
 
-    // ── FIX B-05: Fecha límite para tablas de historial (últimos 90 días) ──
-    const fechaLimite = new Date();
-    fechaLimite.setDate(fechaLimite.getDate() - 90);
-    const fechaLimiteISO = fechaLimite.toISOString();
-    // ───────────────────────────────────────────────────────────────────────
+let isProcessingOfflineQueue = false;
 
-    try {
-        const [
-            { data: prod,  error: errProd  },
-            { data: prov,  error: errProv  },
-            { data: user,  error: errUser  },
-            { data: mov,   error: errMov   },
-            { data: conf,  error: errConf  },
-            { data: rec,   error: errRec   },
-            { data: oc,    error: errOc    },
-            { data: ven,   error: errVen   },
-            { data: mes,   error: errMes   }
-        ] = await Promise.all([
-            supabase.from('productos').select('*').limit(2000),
-            supabase.from('proveedores').select('*').limit(500),
-            supabase.from('usuarios').select('*').limit(200),
-            supabase.from('movimientos').select('*')
-                .gte('fecha', fechaLimiteISO)
-                .order('fecha', { ascending: false })
-                .limit(5000),
-            supabase.from('configuracion').select('*').limit(1),
-            supabase.from('recetas').select('*').limit(1000),
-            supabase.from('ordenes_compra').select('*')
-                .gte('fecha', fechaLimiteISO)
-                .order('fecha', { ascending: false })
-                .limit(500),
-            supabase.from('ventas').select('*')
-                .gte('fecha', fechaLimiteISO)
-                .order('fecha', { ascending: false })
-                .limit(2000),
-            supabase.from('mesas').select('*').limit(200),
-        ]);
+const CLOUD_TABLES = {
+    configuracion: 'configuracion',
+    productos: 'productos',
+    recetas: 'recetas',
+    mesas: 'mesas',
+    ventas: 'ventas',
+    movimientos: 'movimientos',
+    ordenes_compra: 'ordenes_compra',
+    proveedores: 'proveedores',
+    usuarios: 'usuarios',
+    turnos: 'turnos'
+};
 
-        const errores = [errProd, errProv, errUser, errMov, errConf, errRec, errOc, errVen, errMes].filter(Boolean);
-        if (errores.length > 0) {
-            console.error("⚠️ Alerta: Supabase reportó errores al descargar algunas tablas:");
-            errores.forEach(e => console.error("-", e.message));
+const MEMORY_TABLES = {
+    configuracion: 'configuracion',
+    productos: 'productos',
+    recetas: 'recetas',
+    mesas: 'mesas',
+    ventas: 'ventas',
+    movimientos: 'movimientos',
+    ordenes_compra: 'ordenesCompra',
+    proveedores: 'proveedores',
+    usuarios: 'usuarios',
+    turnos: 'turnos'
+};
+
+function getMemoryTableName(tabla) {
+    return MEMORY_TABLES[tabla] || tabla;
+}
+
+function getLocalTable(tabla) {
+    return localDB[tabla] || null;
+}
+
+function normalizePayload(data) {
+    if (data == null) return {};
+    if (typeof structuredClone === 'function') return structuredClone(data);
+    return JSON.parse(JSON.stringify(data));
+}
+
+function updateDBMemory(tabla, metodo, data) {
+    const memoryKey = getMemoryTableName(tabla);
+
+    if (!(memoryKey in DB)) return;
+
+    if (tabla === 'configuracion') {
+        if (metodo === 'delete') {
+            DB.configuracion = {};
+            return;
         }
+        DB.configuracion = { ...(DB.configuracion || {}), ...(data || {}) };
+        return;
+    }
 
-        if (prod) DB.productos      = prod;
-        if (prov) DB.proveedores    = prov;
-        if (user) DB.usuarios       = user;
-        if (mov)  DB.movimientos    = mov;
-        if (rec)  DB.recetas        = rec;
-        if (oc)   DB.ordenesCompra  = oc;
-        if (ven)  DB.ventas         = ven;
-        if (mes)  DB.mesas          = mes;
+    if (!Array.isArray(DB[memoryKey])) {
+        DB[memoryKey] = [];
+    }
 
-        if (conf && conf.length > 0) {
-            DB.configuracion = {
-                nombreEmpresa:  conf[0].nombre_empresa,
-                rfc:            conf[0].rfc            || '',
-                telefono:       conf[0].telefono       || '',
-                direccion:      conf[0].direccion      || '',
-                mensaje_ticket: conf[0].mensaje_ticket || '¡Gracias por su preferencia!',
-                logo_url:       conf[0].logo_url       || '',
-                iva:            conf[0].iva
-            };
-            if (conf[0].categorias) DB.categorias = conf[0].categorias;
-            if (conf[0].unidades)   DB.unidades   = conf[0].unidades;
+    if (metodo === 'insert') {
+        DB[memoryKey] = [...DB[memoryKey], data];
+        return;
+    }
+
+    if (metodo === 'upsert' || metodo === 'update') {
+        const index = DB[memoryKey].findIndex(item => item.id === data?.id);
+        if (index >= 0) {
+            DB[memoryKey][index] = { ...DB[memoryKey][index], ...(data || {}) };
+        } else {
+            DB[memoryKey] = [...DB[memoryKey], data];
         }
+        return;
+    }
 
-        console.log("✅ Datos actualizados:", DB);
-
-    } catch (criticalError) {
-        console.error("❌ Fallo crítico de conexión al descargar datos:", criticalError);
+    if (metodo === 'delete') {
+        const targetId = data?.id;
+        DB[memoryKey] = DB[memoryKey].filter(item => item.id !== targetId);
     }
 }
+
+async function applyLocalMutation(tabla, metodo, data) {
+    const localTable = getLocalTable(tabla);
+    if (!localTable) {
+        throw new Error(`Tabla local no soportada: ${tabla}`);
+    }
+
+    if (tabla === 'configuracion') {
+        if (metodo === 'delete') {
+            if (data?.id != null) {
+                await localTable.delete(data.id);
+            } else {
+                await localTable.clear();
+            }
+            updateDBMemory(tabla, metodo, data);
+            return;
+        }
+
+        await localTable.put(data);
+        updateDBMemory(tabla, metodo, data);
+        return;
+    }
+
+    if (metodo === 'insert' || metodo === 'upsert' || metodo === 'update') {
+        await localTable.put(data);
+        updateDBMemory(tabla, metodo === 'insert' ? 'upsert' : metodo, data);
+        return;
+    }
+
+    if (metodo === 'delete') {
+        if (data?.id == null) {
+            throw new Error(`Se requiere data.id para eliminar en ${tabla}`);
+        }
+        await localTable.delete(data.id);
+        updateDBMemory(tabla, metodo, data);
+        return;
+    }
+
+    throw new Error(`Método offline no soportado: ${metodo}`);
+}
+
+async function sendActionToSupabase(tabla, metodo, data) {
+    const cloudTable = CLOUD_TABLES[tabla];
+    if (!cloudTable) {
+        throw new Error(`Tabla remota no soportada: ${tabla}`);
+    }
+
+    let query = supabase.from(cloudTable);
+
+    if (tabla === 'configuracion') {
+        if (metodo === 'delete') {
+            if (data?.id == null) {
+                throw new Error('Se requiere data.id para eliminar configuracion');
+            }
+            const { error } = await query.delete().eq('id', data.id);
+            if (error) throw error;
+            return;
+        }
+
+        const { error } = await query.upsert(data);
+        if (error) throw error;
+        return;
+    }
+
+    if (metodo === 'insert') {
+        const { error } = await query.insert(data);
+        if (error) throw error;
+        return;
+    }
+
+    if (metodo === 'upsert' || metodo === 'update') {
+        const { error } = await query.upsert(data);
+        if (error) throw error;
+        return;
+    }
+
+    if (metodo === 'delete') {
+        if (data?.id == null) {
+            throw new Error(`Se requiere data.id para eliminar en ${tabla}`);
+        }
+        const { error } = await query.delete().eq('id', data.id);
+        if (error) throw error;
+        return;
+    }
+
+    throw new Error(`Método remoto no soportado: ${metodo}`);
+}
+
+export async function enqueueOfflineAction(tabla, metodo, data, options = {}) {
+    const payload = normalizePayload(data);
+    const queueItem = {
+        tabla,
+        metodo,
+        data: payload,
+        estado: 'pending',
+        fecha: options.fecha || new Date().toISOString(),
+        createdAt: Date.now(),
+        intentos: options.intentos || 0,
+        error: null
+    };
+
+    await applyLocalMutation(tabla, metodo, payload);
+    const id = await localDB.sync_queue.add(queueItem);
+    return { id, ...queueItem };
+}
+
+export async function processOfflineQueue(options = {}) {
+    if (isProcessingOfflineQueue) {
+        return { processed: 0, failed: 0, skipped: true };
+    }
+
+    if (!navigator.onLine) {
+        AppState.isOffline = true;
+        return { processed: 0, failed: 0, skipped: true };
+    }
+
+    isProcessingOfflineQueue = true;
+
+    let processed = 0;
+    let failed = 0;
+
+    try {
+        const pendingItems = await localDB.sync_queue.orderBy('id').toArray();
+
+        for (const item of pendingItems) {
+            if (!item || item.estado === 'done') continue;
+
+            try {
+                await localDB.sync_queue.update(item.id, {
+                    estado: 'processing',
+                    error: null
+                });
+
+                await sendActionToSupabase(item.tabla, item.metodo, item.data);
+
+                await localDB.sync_queue.delete(item.id);
+                processed += 1;
+            } catch (error) {
+                failed += 1;
+                await localDB.sync_queue.update(item.id, {
+                    estado: 'error',
+                    intentos: (item.intentos || 0) + 1,
+                    error: error?.message || 'Error desconocido',
+                    fecha_error: new Date().toISOString()
+                });
+            }
+        }
+
+        if (processed > 0) {
+            await cargarDatosDeNube();
+        }
+
+        if (failed === 0) {
+            AppState.isOffline = false;
+        }
+
+        if (options.notify !== false && processed > 0 && window.showNotification) {
+            window.showNotification(`✅ ${processed} cambio(s) offline sincronizado(s).`, 'success');
+        }
+
+        if (options.notify !== false && failed > 0 && window.showNotification) {
+            window.showNotification(`⚠️ ${failed} cambio(s) offline no se pudieron sincronizar.`, 'error');
+        }
+
+        return { processed, failed, skipped: false };
+    } finally {
+        isProcessingOfflineQueue = false;
+    }
+}
+
+export async function getOfflineQueue() {
+    return localDB.sync_queue.orderBy('id').toArray();
+}
+
+export async function clearOfflineQueue() {
+    await localDB.sync_queue.clear();
+}
+
+// ─── 3. MOTOR DE SINCRONIZACIÓN (NUBE <-> LOCAL) ─────────────────────────────
+export async function cargarDatosDeNube() {
+    try {
+        const [
+            { data: conf }, { data: prod }, { data: rec },
+            { data: mes }, { data: ven }, { data: mov },
+            { data: oc }, { data: prov }, { data: usu }, { data: tur }
+        ] = await Promise.all([
+            supabase.from('configuracion').select('*').single(),
+            supabase.from('productos').select('*').order('nombre'),
+            supabase.from('recetas').select('*').order('nombre'),
+            supabase.from('mesas').select('*').order('nombre'),
+            supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(300),
+            supabase.from('movimientos').select('*').order('fecha', { ascending: false }).limit(300),
+            supabase.from('ordenes_compra').select('*').order('fecha', { ascending: false }),
+            supabase.from('proveedores').select('*').order('nombre'),
+            supabase.from('usuarios').select('*'),
+            supabase.from('turnos').select('*').order('fecha_apertura', { ascending: false }).limit(50)
+        ]);
+
+        DB.configuracion = conf || {};
+        DB.productos = prod || [];
+        DB.recetas = rec || [];
+        DB.mesas = mes || [];
+        DB.ventas = ven || [];
+        DB.movimientos = mov || [];
+        DB.ordenesCompra = oc || [];
+        DB.proveedores = prov || [];
+        DB.usuarios = usu || [];
+        DB.turnos = tur || [];
+
+        await localDB.transaction('rw', localDB.configuracion, localDB.productos, localDB.recetas, localDB.mesas, localDB.ventas, localDB.movimientos, localDB.ordenes_compra, localDB.proveedores, localDB.usuarios, localDB.turnos, async () => {
+            if (conf) await localDB.configuracion.put(conf);
+            await localDB.productos.bulkPut(prod || []);
+            await localDB.recetas.bulkPut(rec || []);
+            await localDB.mesas.bulkPut(mes || []);
+            await localDB.ventas.bulkPut(ven || []);
+            await localDB.movimientos.bulkPut(mov || []);
+            await localDB.ordenes_compra.bulkPut(oc || []);
+            await localDB.proveedores.bulkPut(prov || []);
+            await localDB.usuarios.bulkPut(usu || []);
+            await localDB.turnos.bulkPut(tur || []);
+        });
+
+        AppState.isOffline = false;
+    } catch (error) {
+        console.warn('⚠️ Sin conexión a internet. Cargando base de datos local (Dexie)...');
+        AppState.isOffline = true;
+
+        const confLocal = await localDB.configuracion.toArray();
+        DB.configuracion = confLocal[0] || {};
+        DB.productos = await localDB.productos.toArray();
+        DB.recetas = await localDB.recetas.toArray();
+        DB.mesas = await localDB.mesas.toArray();
+        DB.ventas = await localDB.ventas.toArray();
+        DB.movimientos = await localDB.movimientos.toArray();
+        DB.ordenesCompra = await localDB.ordenes_compra.toArray();
+        DB.proveedores = await localDB.proveedores.toArray();
+        DB.usuarios = await localDB.usuarios.toArray();
+        DB.turnos = await localDB.turnos.toArray();
+
+        if (window.showNotification) {
+            window.showNotification('Estás en MODO OFFLINE. Usando datos guardados.', 'error');
+        }
+    }
+}
+
+// ─── ESCUCHADORES DE RED DEL NAVEGADOR ───────────────────────────────────────
+window.addEventListener('online', () => {
+    AppState.isOffline = false;
+
+    if (window.showNotification) {
+        window.showNotification('✅ Conexión restaurada. Sincronizando datos...', 'success');
+    }
+
+    processOfflineQueue({ notify: false })
+        .then(() => cargarDatosDeNube())
+        .then(() => { if (window.render) window.render(); })
+        .catch(() => {
+            if (window.render) window.render();
+        });
+});
+
+window.addEventListener('offline', () => {
+    AppState.isOffline = true;
+    if (window.showNotification) window.showNotification('⚠️ Conexión perdida. Modo Offline Activado.', 'error');
+    if (window.render) window.render();
+});

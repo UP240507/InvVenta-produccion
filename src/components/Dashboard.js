@@ -1,11 +1,16 @@
 // src/components/Dashboard.js
 import { DB, AppState, cargarDatosDeNube } from '../store/state.js';
-import { formatCurrency, showNotification, registrarMovimientoEnNube } from '../utils/helpers.js';
+import { formatCurrency, showNotification } from '../utils/helpers.js';
 import { supabase } from '../api/supabase.js';
 
 // ─── Utilidad de fechas ──────────────────────────────────────────────────────
 function hacerCeroHoras(fecha) {
     fecha.setHours(0, 0, 0, 0);
+}
+
+function getMinutosAbierta(fechaStr) {
+    if (!fechaStr) return 0;
+    return Math.floor((Date.now() - new Date(fechaStr).getTime()) / 60000);
 }
 
 export function renderDashboard() {
@@ -29,7 +34,10 @@ export function renderDashboard() {
     const totalSemana = ventasSemana.reduce((s, v) => s + (v.total || 0), 0);
     const totalMes = ventasMes.reduce((s, v) => s + (v.total || 0), 0);
 
-    // Productos más vendidos (Top 3)
+    // Métrica nueva: Ticket Promedio
+    const ticketPromedioMes = ventasMes.length > 0 ? (totalMes / ventasMes.length) : 0;
+
+    // Productos más vendidos (Top 5)
     const conteoVentas = {};
     ventasMes.forEach(v => {
         (v.items || []).forEach(i => {
@@ -38,7 +46,7 @@ export function renderDashboard() {
     });
     const topPlatillos = Object.entries(conteoVentas)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 3);
+        .slice(0, 5);
 
     // ─── CÁLCULOS DE INVENTARIO ─────────────────────────────────────────────
     const totalValue = DB.productos.reduce((sum, p) => sum + (p.stock * p.precio), 0);
@@ -46,29 +54,67 @@ export function renderDashboard() {
     const comprasPendientes = DB.ordenesCompra.filter(o => (o.estado || '').toLowerCase() === 'pendiente').length;
     const hayProductos = DB.productos.length > 0;
 
+    // Últimos movimientos para el feed en tiempo real
+    const ultimosMovimientos = (DB.movimientos || []).slice(0, 5);
+
+    // ─── PLATOS PENDIENTES EN MESAS (SISTEMA KDS) ───────────────────────────
+    const platosPendientes = [];
+    (DB.mesas || []).forEach(m => {
+        if (m.estado === 'ocupada' || m.estado === 'por_cobrar') {
+            const items = m.orden_actual?.items || [];
+            const mins = getMinutosAbierta(m.abierta_en);
+            items.forEach((i, idx) => {
+                // Solo mostramos los que NO han sido servidos
+                if (!i.servido) {
+                    platosPendientes.push({
+                        mesaId: m.id,
+                        mesa: m.nombre,
+                        zona: m.zona,
+                        nombre: i.nombre,
+                        cantidad: i.cantidad,
+                        nota: i.nota,
+                        tiempo: mins,
+                        itemIndex: idx // Guardamos su posición exacta para poder actualizarlo
+                    });
+                }
+            });
+        }
+    });
+    // Ordenar los que llevan más tiempo esperando primero
+    platosPendientes.sort((a, b) => b.tiempo - a.tiempo);
+
     return `
         <div class="space-y-6 animate-fade-in pb-20">
             
             <div>
-                <h2 class="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Ingresos por Ventas POS</h2>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+                <h2 class="text-sm font-black text-slate-400 uppercase tracking-widest mb-4">Métricas de Venta</h2>
+                <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
                     <div class="bg-gradient-to-br from-emerald-500 to-teal-600 p-6 rounded-2xl shadow-lg shadow-emerald-500/20 text-white relative overflow-hidden group">
-                        <i data-lucide="banknote" class="absolute -right-4 -bottom-4 w-32 h-32 text-white opacity-10 group-hover:scale-110 transition-transform"></i>
-                        <p class="font-bold text-emerald-100 uppercase tracking-wide text-sm mb-1">Hoy</p>
+                        <i data-lucide="wallet" class="absolute -right-4 -bottom-4 w-32 h-32 text-white opacity-10 group-hover:scale-110 transition-transform"></i>
+                        <p class="font-bold text-emerald-100 uppercase tracking-wide text-xs mb-1">Ingresos Hoy</p>
                         <h3 class="text-4xl font-black">${formatCurrency(totalHoy)}</h3>
-                        <p class="text-sm text-emerald-100 mt-2">${ventasHoy.length} tickets generados</p>
+                        <p class="text-xs font-medium text-emerald-100 mt-2">${ventasHoy.length} ventas procesadas hoy</p>
                     </div>
                     
                     <div class="bg-white p-6 rounded-2xl border shadow-sm flex flex-col justify-center relative overflow-hidden">
                         <div class="absolute left-0 top-0 h-full w-1 bg-blue-500"></div>
-                        <p class="text-slate-400 font-bold uppercase tracking-wide text-sm mb-1">Esta Semana</p>
-                        <h3 class="text-3xl font-black text-slate-800">${formatCurrency(totalSemana)}</h3>
+                        <p class="text-slate-400 font-bold uppercase tracking-wide text-xs mb-1">Esta Semana</p>
+                        <h3 class="text-2xl font-black text-slate-800">${formatCurrency(totalSemana)}</h3>
+                        <p class="text-xs text-slate-500 mt-1">${ventasSemana.length} tickets en la semana</p>
                     </div>
 
                     <div class="bg-white p-6 rounded-2xl border shadow-sm flex flex-col justify-center relative overflow-hidden">
                         <div class="absolute left-0 top-0 h-full w-1 bg-purple-500"></div>
-                        <p class="text-slate-400 font-bold uppercase tracking-wide text-sm mb-1">Este Mes</p>
-                        <h3 class="text-3xl font-black text-slate-800">${formatCurrency(totalMes)}</h3>
+                        <p class="text-slate-400 font-bold uppercase tracking-wide text-xs mb-1">Este Mes</p>
+                        <h3 class="text-2xl font-black text-slate-800">${formatCurrency(totalMes)}</h3>
+                        <p class="text-xs text-slate-500 mt-1">${ventasMes.length} tickets en el mes</p>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm flex flex-col justify-center relative overflow-hidden">
+                        <div class="absolute left-0 top-0 h-full w-1 bg-orange-500"></div>
+                        <p class="text-slate-400 font-bold uppercase tracking-wide text-xs mb-1">Ticket Promedio</p>
+                        <h3 class="text-2xl font-black text-slate-800">${formatCurrency(ticketPromedioMes)}</h3>
+                        <p class="text-xs text-slate-500 mt-1">Gasto medio por cliente (Mensual)</p>
                     </div>
                 </div>
             </div>
@@ -76,86 +122,138 @@ export function renderDashboard() {
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
                 
                 <div class="lg:col-span-2 space-y-6">
-                    <h2 class="text-sm font-black text-slate-400 uppercase tracking-widest">Salud del Inventario</h2>
                     
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                        <div class="bg-white p-6 rounded-2xl border shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
-                            <div class="absolute right-0 top-0 h-full w-1 bg-slate-800"></div>
-                            <div class="flex justify-between items-start">
-                                <div><p class="text-slate-500 text-xs font-bold uppercase tracking-widest">Dinero Congelado</p><h3 class="text-2xl font-black text-slate-800 mt-1">${formatCurrency(totalValue)}</h3></div>
-                                <div class="bg-slate-100 p-3 rounded-xl"><i data-lucide="boxes" class="text-slate-600 w-5 h-5"></i></div>
-                            </div>
-                        </div>
-                        <div class="bg-white p-6 rounded-2xl border shadow-sm hover:shadow-md transition-shadow relative overflow-hidden cursor-pointer group" onclick="AppState.currentScreen='entradas_mercancia'; window.render()">
-                            <div class="absolute right-0 top-0 h-full w-1 bg-yellow-500"></div>
-                            <div class="flex justify-between items-start">
-                                <div><p class="text-slate-500 text-xs font-bold uppercase tracking-widest group-hover:text-yellow-600 transition-colors">Órdenes en tránsito</p><h3 class="text-2xl font-black text-slate-800 mt-1">${comprasPendientes}</h3></div>
-                                <div class="bg-yellow-50 p-3 rounded-xl"><i data-lucide="truck" class="text-yellow-600 w-5 h-5"></i></div>
-                            </div>
+                    <div class="bg-white p-6 rounded-2xl border shadow-sm h-80 flex flex-col">
+                        <h3 class="text-sm font-black text-slate-700 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <i data-lucide="trending-up" class="w-4 h-4 text-blue-500"></i> Tendencia de Ventas (Últimos 7 días)
+                        </h3>
+                        <div class="flex-1 w-full relative">
+                            <canvas id="graficoVentasSemana"></canvas>
                         </div>
                     </div>
 
-                    <div class="bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col">
-                        <div class="px-6 py-4 border-b flex justify-between items-center bg-slate-50">
-                            <h3 class="font-bold text-slate-800 flex items-center gap-2"><i data-lucide="siren" class="w-5 h-5 text-red-500"></i> Alertas de Desabasto</h3>
-                            <button onclick="AppState.currentScreen='compras_crear'; window.render()" class="text-xs bg-white border px-3 py-1.5 rounded-lg text-slate-600 font-bold hover:bg-slate-100 transition-colors">Abastecer</button>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div class="bg-white p-6 rounded-2xl border shadow-sm flex flex-col h-80">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="font-bold text-sm text-slate-700 uppercase tracking-wider">Valor Inventario</h3>
+                            </div>
+                            <div class="flex-1 w-full relative">
+                                ${hayProductos 
+                                    ? '<canvas id="graficoCategorias"></canvas>' 
+                                    : '<div class="h-full flex items-center justify-center text-slate-400 italic text-sm">Sin datos para graficar.</div>'
+                                }
+                            </div>
                         </div>
-                        <div class="overflow-x-auto">
-                            <table class="w-full text-sm">
-                                <thead class="bg-white text-slate-400 text-xs uppercase border-b"><tr><th class="px-6 py-3 text-left font-bold">Ingrediente</th><th class="px-6 py-3 text-center font-bold">Actual</th><th class="px-6 py-3 text-center font-bold">Mínimo</th></tr></thead>
-                                <tbody>
-                                    ${lowStock.length ? lowStock.slice(0,4).map(p => `
-                                        <tr class="border-b border-slate-50 hover:bg-red-50/50 transition-colors">
-                                            <td class="px-6 py-3 font-bold text-slate-700">${p.nombre}</td>
-                                            <td class="px-6 py-3 text-center font-black text-red-500">${p.stock} <span class="text-xs text-red-300">${p.unidad}</span></td>
-                                            <td class="px-6 py-3 text-center text-slate-400 font-medium">${p.min}</td>
-                                        </tr>
-                                    `).join('') : `
-                                        <tr><td colspan="3" class="p-10 text-center text-slate-400">
-                                            <div class="bg-green-50 w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"><i data-lucide="check" class="text-green-500 w-6 h-6"></i></div>
-                                            <p class="font-bold">Inventario Sano</p>
-                                            <p class="text-xs mt-1">Ningún producto por debajo del mínimo.</p>
-                                        </td></tr>
-                                    `}
-                                </tbody>
-                            </table>
+
+                        <div class="bg-white p-6 rounded-2xl border shadow-sm overflow-hidden flex flex-col h-80">
+                            <div class="border-b border-slate-100 pb-3 mb-3 flex justify-between items-center">
+                                <h3 class="font-bold text-slate-800 flex items-center gap-2 text-sm uppercase tracking-wider"><i data-lucide="siren" class="w-4 h-4 text-red-500"></i> Desabasto</h3>
+                                <button onclick="AppState.currentScreen='compras_crear'; window.render()" class="text-[10px] bg-slate-100 px-2 py-1 rounded font-bold text-slate-600 hover:bg-slate-200">Abastecer</button>
+                            </div>
+                            <div class="overflow-y-auto flex-1 custom-scrollbar pr-2 space-y-3">
+                                ${lowStock.length ? lowStock.map(p => `
+                                    <div class="flex items-center justify-between">
+                                        <div>
+                                            <p class="font-bold text-slate-700 text-sm">${p.nombre}</p>
+                                            <p class="text-[10px] text-slate-400">Mínimo: ${p.min}</p>
+                                        </div>
+                                        <span class="px-2 py-1 bg-red-100 text-red-600 font-black text-xs rounded-md">${p.stock} ${p.unidad}</span>
+                                    </div>
+                                `).join('') : `
+                                    <div class="h-full flex flex-col items-center justify-center text-slate-400">
+                                        <div class="bg-green-50 w-10 h-10 rounded-full flex items-center justify-center mb-2"><i data-lucide="check" class="text-green-500 w-5 h-5"></i></div>
+                                        <p class="font-bold text-sm">Inventario Sano</p>
+                                    </div>
+                                `}
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="space-y-6">
-                    <h2 class="text-sm font-black text-slate-400 uppercase tracking-widest hidden lg:block">Distribución</h2>
                     
-                    <div class="bg-white p-6 rounded-2xl border shadow-sm flex flex-col h-[320px]">
-                        <div class="flex justify-between items-center mb-4">
-                            <h3 class="font-bold text-sm text-slate-700 uppercase tracking-wider">Valor por Categoría</h3>
-                        </div>
-                        <div class="flex-1 w-full relative">
-                            ${hayProductos 
-                                ? '<canvas id="graficoCategorias"></canvas>' 
-                                : '<div class="h-full flex items-center justify-center text-slate-400 italic text-sm">Sin datos para graficar.</div>'
-                            }
+                    <div class="bg-white p-5 rounded-2xl border-2 border-orange-200 shadow-sm flex flex-col h-80 relative overflow-hidden">
+                        <div class="absolute right-0 top-0 h-full w-1 bg-orange-400"></div>
+                        <h3 class="font-bold text-sm text-orange-600 uppercase tracking-wider mb-4 flex items-center gap-2 border-b border-orange-100 pb-2">
+                            <i data-lucide="utensils-crossed" class="w-4 h-4"></i> Pendientes (Cocina)
+                            <span class="bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-[10px] ml-auto">${platosPendientes.length}</span>
+                        </h3>
+                        <div class="overflow-y-auto flex-1 custom-scrollbar pr-2 space-y-2">
+                            ${platosPendientes.length ? platosPendientes.map(p => `
+                                <div class="flex items-start justify-between p-3 bg-orange-50/50 rounded-xl border border-orange-100 hover:bg-orange-50 transition-colors group">
+                                    <div class="flex-1 pr-2">
+                                        <p class="font-black text-slate-800 text-sm leading-tight">${p.cantidad}x ${p.nombre}</p>
+                                        <p class="text-[10px] text-slate-500 mt-1 font-bold">📍 ${p.mesa} <span class="font-normal opacity-70">(${p.zona})</span></p>
+                                        ${p.nota ? `<p class="text-[10px] text-orange-600 italic mt-0.5 bg-orange-100/50 inline-block px-1.5 rounded">📝 ${p.nota}</p>` : ''}
+                                    </div>
+                                    <div class="flex flex-col items-end gap-2 flex-shrink-0">
+                                        <span class="text-[10px] font-black uppercase tracking-widest ${p.tiempo > 20 ? 'text-red-500 bg-red-100 animate-pulse' : 'text-orange-500 bg-orange-100'} px-2 py-1 rounded-md shadow-sm">
+                                            ${p.tiempo} min
+                                        </span>
+                                        <button onclick="window.marcarPlatoServido('${p.mesaId}', ${p.itemIndex})" class="bg-white border border-green-200 text-green-500 hover:bg-green-50 hover:text-green-600 hover:border-green-400 p-1.5 rounded-lg transition-all shadow-sm group-hover:scale-105" title="Marcar como entregado a la mesa">
+                                            <i data-lucide="check" class="w-4 h-4"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('') : `
+                                <div class="h-full flex flex-col items-center justify-center text-slate-400">
+                                    <div class="bg-slate-100 w-12 h-12 rounded-full flex items-center justify-center mb-3 opacity-50"><i data-lucide="check-circle" class="text-slate-400 w-6 h-6"></i></div>
+                                    <p class="font-bold text-sm text-center">Cocina Libre</p>
+                                    <p class="text-[10px] text-center mt-1">No hay comandas pendientes.</p>
+                                </div>
+                            `}
                         </div>
                     </div>
 
-                    <div class="bg-white p-6 rounded-2xl border shadow-sm">
-                        <h3 class="font-bold text-sm text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
-                            <i data-lucide="medal" class="w-4 h-4 text-orange-500"></i> Top Platillos del Mes
+                    <div class="bg-slate-900 p-6 rounded-2xl shadow-xl border border-slate-800 text-white">
+                        <h3 class="font-bold text-sm text-slate-300 uppercase tracking-wider mb-5 flex items-center gap-2">
+                            <i data-lucide="flame" class="w-4 h-4 text-orange-500"></i> Top Platillos
                         </h3>
-                        <div class="space-y-3">
+                        <div class="space-y-4">
                             ${topPlatillos.length ? topPlatillos.map(([nombre, cant], i) => `
-                                <div class="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100">
+                                <div class="flex items-center justify-between">
                                     <div class="flex items-center gap-3">
-                                        <span class="font-black text-slate-300 text-lg">#${i+1}</span>
-                                        <span class="font-bold text-slate-700 text-sm">${nombre}</span>
+                                        <span class="font-black text-slate-600 text-sm w-4">${i+1}.</span>
+                                        <span class="font-bold text-slate-200 text-sm truncate max-w-[120px]" title="${nombre}">${nombre}</span>
                                     </div>
-                                    <span class="bg-orange-100 text-orange-700 text-xs font-black px-2 py-1 rounded">${cant} uds</span>
+                                    <span class="text-orange-400 font-black text-sm">${cant} <span class="text-[10px] font-normal opacity-50">uds</span></span>
                                 </div>
-                            `).join('') : '<p class="text-slate-400 text-xs text-center py-4 italic">No hay ventas registradas este mes.</p>'}
+                            `).join('') : '<p class="text-slate-500 text-xs italic">No hay ventas registradas.</p>'}
                         </div>
+                    </div>
+
+                    <div class="bg-white rounded-2xl border shadow-sm p-6">
+                        <h3 class="font-bold text-sm text-slate-700 uppercase tracking-wider mb-4 flex items-center gap-2">
+                            <i data-lucide="activity" class="w-4 h-4 text-slate-400"></i> Feed de Actividad
+                        </h3>
+                        <div class="space-y-4">
+                            ${ultimosMovimientos.length ? ultimosMovimientos.map(m => {
+                                const esEntrada = m.tipo.includes('Entrada');
+                                const esVenta = m.tipo.includes('Salida') || m.tipo.includes('Venta');
+                                const colorIcon = esEntrada ? 'text-green-500 bg-green-50 border-green-100' : (esVenta ? 'text-blue-500 bg-blue-50 border-blue-100' : 'text-red-500 bg-red-50 border-red-100');
+                                const icon = esEntrada ? 'arrow-down-to-line' : (esVenta ? 'shopping-bag' : 'trash-2');
+                                
+                                const p = DB.productos.find(x => String(x.id) === String(m.producto_id));
+                                const nombreProd = p ? p.nombre : 'Producto';
+                                
+                                return `
+                                    <div class="flex gap-3">
+                                        <div class="w-8 h-8 rounded-full border ${colorIcon} flex items-center justify-center flex-shrink-0 mt-0.5">
+                                            <i data-lucide="${icon}" class="w-3.5 h-3.5"></i>
+                                        </div>
+                                        <div>
+                                            <p class="text-xs font-bold text-slate-700 leading-tight">${m.tipo}: <span class="font-normal">${nombreProd}</span></p>
+                                            <p class="text-[10px] text-slate-400 mt-0.5">${new Date(m.fecha).toLocaleString('es-MX', {day: '2-digit', month: 'short', hour: '2-digit', minute:'2-digit'})} · ${m.usuario}</p>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('') : '<p class="text-slate-400 text-xs italic">Sin actividad reciente.</p>'}
+                        </div>
+                        <button onclick="AppState.currentScreen='reportes'; AppState.reporteActivo='kardex'; window.render()" class="w-full mt-4 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 py-2 rounded-lg transition-colors">
+                            Ver todo el historial
+                        </button>
                     </div>
                 </div>
-
             </div>
 
             <div class="pt-4">
@@ -181,66 +279,164 @@ export function renderDashboard() {
     `;
 }
 
-// ─── LÓGICA DE GRÁFICA ────────────────────────────────────────────────────────
+// ─── LÓGICA DE GRÁFICAS ───────────────────────────────────────────────────────
 window.renderGraficoCategorias = function() {
-    const canvas = document.getElementById('graficoCategorias');
-    if (!canvas) return;
-    
-    // Si la gráfica ya existía, la destruimos para evitar "fantasmas" al redibujar
-    if(window.chartCat) window.chartCat.destroy();
+    if (AppState.currentScreen !== 'dashboard') return;
 
-    // Pequeño timeout para asegurar que el canvas ya se pintó en el HTML
-    setTimeout(() => {
-        const ctx = canvas.getContext('2d');
-        const categorias = {};
-        DB.productos.forEach(p => {
-            const valor = p.stock * p.precio;
-            // Usamos p.categoria si existe, si no, usamos p.cat o "Sin clasificar"
-            const nombreCat = p.categoria || p.cat || 'Otros';
-            if (valor > 0) categorias[nombreCat] = (categorias[nombreCat] || 0) + valor;
-        });
+    const canvasCat = document.getElementById('graficoCategorias');
+    if (canvasCat) {
+        if(window.chartCat) window.chartCat.destroy();
 
-        if (Object.keys(categorias).length === 0) return;
-        
-        const esCelular = window.innerWidth < 768;
+        setTimeout(() => {
+            const ctx = canvasCat.getContext('2d');
+            const categorias = {};
+            DB.productos.forEach(p => {
+                const valor = p.stock * p.precio;
+                const nombreCat = p.categoria || p.cat || 'Otros';
+                if (valor > 0) categorias[nombreCat] = (categorias[nombreCat] || 0) + valor;
+            });
 
-        window.chartCat = new Chart(ctx, {
-            type: 'doughnut',
-            data: {
-                labels: Object.keys(categorias),
-                datasets: [{
-                    data: Object.values(categorias),
-                    backgroundColor: ['#f97316', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#eab308', '#64748b'],
-                    borderWidth: 0,
-                    hoverOffset: 10
-                }]
-            },
-            options: {
-                responsive: true, 
-                maintainAspectRatio: false,
-                layout: { padding: 10 },
-                plugins: { 
-                    legend: { 
-                        position: esCelular ? 'bottom' : 'right', 
-                        labels: { usePointStyle: true, boxWidth: 8, font: {family: "'Inter', sans-serif", size: 11}, color: '#64748b' } 
+            if (Object.keys(categorias).length > 0) {
+                window.chartCat = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(categorias),
+                        datasets: [{
+                            data: Object.values(categorias),
+                            backgroundColor: ['#f97316', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#eab308', '#64748b'],
+                            borderWidth: 0,
+                            hoverOffset: 10
+                        }]
                     },
-                    tooltip: {
-                        callbacks: {
-                            label: function(context) {
-                                let label = context.label || '';
-                                if (label) { label += ': '; }
-                                if (context.parsed !== null) {
-                                    label += new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(context.parsed);
+                    options: {
+                        responsive: true, 
+                        maintainAspectRatio: false,
+                        layout: { padding: 10 },
+                        plugins: { 
+                            legend: { 
+                                position: 'right', 
+                                labels: { usePointStyle: true, boxWidth: 8, font: {family: "'Inter', sans-serif", size: 10}, color: '#64748b' } 
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.label || '';
+                                        if (label) { label += ': '; }
+                                        if (context.parsed !== null) {
+                                            label += new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(context.parsed);
+                                        }
+                                        return label;
+                                    }
                                 }
-                                return label;
+                            }
+                        },
+                        cutout: '75%'
+                    }
+                });
+            }
+        }, 100);
+    }
+
+    const canvasTendencia = document.getElementById('graficoVentasSemana');
+    if (canvasTendencia) {
+        if(window.chartTendencia) window.chartTendencia.destroy();
+
+        setTimeout(() => {
+            const ctx = canvasTendencia.getContext('2d');
+            
+            const dias = [];
+            const ventasPorDia = {};
+            for (let i = 6; i >= 0; i--) {
+                const d = new Date();
+                d.setDate(d.getDate() - i);
+                const fechaStr = d.toISOString().split('T')[0]; 
+                dias.push(d.toLocaleDateString('es-MX', { weekday: 'short' }).toUpperCase());
+                ventasPorDia[fechaStr] = 0;
+            }
+
+            DB.ventas.forEach(v => {
+                const fechaVenta = v.fecha.split('T')[0];
+                if (ventasPorDia[fechaVenta] !== undefined) {
+                    ventasPorDia[fechaVenta] += (v.total || 0);
+                }
+            });
+
+            window.chartTendencia = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dias,
+                    datasets: [{
+                        label: 'Ingresos ($)',
+                        data: Object.values(ventasPorDia),
+                        borderColor: '#3b82f6', 
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 3,
+                        pointBackgroundColor: '#ffffff',
+                        pointBorderColor: '#3b82f6',
+                        pointBorderWidth: 2,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        fill: true,
+                        tension: 0.4 
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(context.parsed.y);
+                                }
                             }
                         }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: '#f1f5f9', drawBorder: false },
+                            ticks: { 
+                                color: '#94a3b8',
+                                font: { size: 10 },
+                                callback: function(value) {
+                                    return '$' + value;
+                                }
+                            }
+                        },
+                        x: {
+                            grid: { display: false, drawBorder: false },
+                            ticks: { color: '#94a3b8', font: { size: 10, weight: 'bold' } }
+                        }
                     }
-                },
-                cutout: '75%' // Hace la dona más delgada y elegante
-            }
-        });
-    }, 100);
+                }
+            });
+        }, 150);
+    }
+};
+
+// ─── LÓGICA KDS (Marcar como Servido) ─────────────────────────────────────────
+window.marcarPlatoServido = async (mesaId, itemIdx) => {
+    const mesa = DB.mesas.find(m => String(m.id) === String(mesaId));
+    if (!mesa || !mesa.orden_actual || !mesa.orden_actual.items) return;
+
+    // Modificamos el item específico para que ya no salga en pendientes
+    mesa.orden_actual.items[itemIdx].servido = true;
+
+    try {
+        const { error } = await supabase.from('mesas')
+            .update({ orden_actual: mesa.orden_actual })
+            .eq('id', mesaId);
+        
+        if (error) throw error;
+        
+        await cargarDatosDeNube(); // Refresca los datos locales
+        window.render(); // Redibuja el Dashboard (el platillo desaparecerá de la lista)
+        showNotification('Platillo entregado a la mesa', 'success');
+    } catch (err) {
+        showNotification('Error al actualizar comanda: ' + err.message, 'error');
+    }
 };
 
 window.procesarCSVSoftRestaurant = async (input) => {
@@ -255,8 +451,7 @@ window.procesarCSVSoftRestaurant = async (input) => {
 
         showNotification('Analizando archivo...', 'info');
 
-        // ── FIX B-06: Acumular cambios en memoria antes de escribir ─────────
-        const cambios = new Map(); // productoId → { prod, totalDescuento, descripciones[] }
+        const cambios = new Map(); 
 
         for (let i = 1; i < rows.length; i++) {
             const row = rows[i].split(',');
@@ -299,7 +494,6 @@ window.procesarCSVSoftRestaurant = async (input) => {
             return;
         }
 
-        // ── Aplicar todos los cambios en paralelo ────────────────────────────
         try {
             await Promise.all([...cambios.values()].map(async ({ prod, totalDescuento, descripciones }) => {
                 const nuevoStock = prod.stock - totalDescuento;
@@ -325,7 +519,6 @@ window.procesarCSVSoftRestaurant = async (input) => {
             showNotification('Error al aplicar cambios: ' + err.message, 'error');
             input.value = '';
         }
-        // ─────────────────────────────────────────────────────────────────────
     };
     reader.readAsText(file);
 };

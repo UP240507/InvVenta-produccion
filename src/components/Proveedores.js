@@ -11,8 +11,11 @@ export function renderProveedores() {
     const inactivos = DB.proveedores.filter(p => p.activo === false);
 
     const cardProveedor = (p, esActivo) => {
-        // Estadísticas rápidas del proveedor
-        const ordenes = (DB.ordenesCompra || []).filter(o => o.proveedor === p.nombre);
+        // FIX B-19: Filtrado robusto (Prioriza ID, fallback a nombre para retrocompatibilidad)
+        const ordenes = (DB.ordenesCompra || []).filter(o => 
+            (o.proveedor_id && String(o.proveedor_id) === String(p.id)) || 
+            (o.proveedor === p.nombre)
+        );
         const totalComprado = ordenes.reduce((s, o) => s + (o.total || 0), 0);
         const ultimaCompra = ordenes.sort((a, b) => new Date(b.fecha) - new Date(a.fecha))[0];
 
@@ -50,7 +53,6 @@ export function renderProveedores() {
                 <div class="flex items-center gap-2"><i data-lucide="mail" class="w-4 h-4 text-gray-400"></i> ${p.email || '---'}</div>
             </div>
 
-            <!-- Estadísticas rápidas -->
             <div class="border-t pt-3 mt-3 grid grid-cols-2 gap-3 text-center text-xs">
                 <div class="bg-gray-50 rounded-lg p-2">
                     <p class="text-gray-400 font-bold uppercase">Órdenes</p>
@@ -63,7 +65,6 @@ export function renderProveedores() {
             </div>
             ${ultimaCompra ? `<p class="text-xs text-gray-400 mt-2 text-center">Última compra: ${formatDate(ultimaCompra.fecha)}</p>` : ''}
 
-            <!-- Botón Nueva OC -->
             ${esActivo ? `
             <button onclick="window.nuevaOCProveedor(${p.id})"
                 class="mt-4 w-full bg-purple-600 hover:bg-purple-700 text-white py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-all shadow-sm shadow-purple-100">
@@ -107,8 +108,11 @@ window.nuevaOCProveedor = (id) => {
     const prov = DB.proveedores.find(p => p.id === id);
     if (!prov) return;
 
-    // Productos que se le han comprado antes a este proveedor
-    const ordenesPrev = (DB.ordenesCompra || []).filter(o => o.proveedor === prov.nombre);
+    // Productos que se le han comprado antes a este proveedor (Filtro Robusto)
+    const ordenesPrev = (DB.ordenesCompra || []).filter(o => 
+        (o.proveedor_id && String(o.proveedor_id) === String(prov.id)) || 
+        (o.proveedor === prov.nombre)
+    );
     const conteoProductos = {};
     ordenesPrev.forEach(o => {
         (o.items || []).forEach(item => {
@@ -122,7 +126,7 @@ window.nuevaOCProveedor = (id) => {
         .sort((a, b) => b[1] - a[1])
         .slice(0, 5)
         .map(([key]) => {
-            const prod = DB.productos.find(p => p.id === parseInt(key) || p.nombre === key);
+            const prod = DB.productos.find(p => String(p.id) === String(key) || p.nombre === key);
             return prod;
         }).filter(Boolean);
 
@@ -138,7 +142,6 @@ window.nuevaOCProveedor = (id) => {
                 </div>
             </div>
 
-            <!-- Productos frecuentes como acceso rápido -->
             ${productosFrec.length > 0 ? `
             <div class="mb-5">
                 <p class="text-xs font-bold text-gray-500 uppercase mb-2">Compras frecuentes a este proveedor</p>
@@ -153,7 +156,6 @@ window.nuevaOCProveedor = (id) => {
                 </div>
             </div>` : ''}
 
-            <!-- Agregar producto -->
             <div class="bg-gray-50 rounded-xl p-4 mb-4">
                 <p class="text-xs font-bold text-gray-500 uppercase mb-3">Agregar producto</p>
                 <div class="flex gap-2">
@@ -169,19 +171,17 @@ window.nuevaOCProveedor = (id) => {
                 </div>
             </div>
 
-            <!-- Lista de items -->
             <div id="ocItemsLista" class="space-y-2 mb-4 min-h-[60px]">
                 <p class="text-center text-gray-400 text-sm py-4" id="ocListaVacia">Agrega productos a la orden</p>
             </div>
 
-            <!-- Total -->
             <div class="border-t pt-3 flex justify-between items-center mb-5">
                 <span class="font-bold text-gray-600">Total estimado</span>
                 <span id="ocTotal" class="text-2xl font-black text-gray-900">$0.00</span>
             </div>
 
             <div class="flex gap-3">
-                <button onclick="closeModal()" class="flex-1 border py-3 rounded-xl font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
+                <button onclick="window.closeModal()" class="flex-1 border py-3 rounded-xl font-bold text-gray-600 hover:bg-gray-50">Cancelar</button>
                 <button onclick="window.ocConfirmar('${prov.nombre}', '${prov.id}')" id="btnOCConfirmar"
                     class="flex-1 bg-purple-600 text-white py-3 rounded-xl font-black hover:bg-purple-700 flex items-center justify-center gap-2">
                     <i data-lucide="check-circle" class="w-5 h-5"></i> Confirmar Orden
@@ -266,10 +266,10 @@ window.ocAgregarProducto = () => {
 };
 
 window.ocAgregarProductoRapido = (productoId) => {
-    const prod = DB.productos.find(p => p.id === productoId);
+    const prod = DB.productos.find(p => String(p.id) === String(productoId));
     if (!prod) return;
 
-    const existente = window._ocItems.find(i => i.productoId === prod.id);
+    const existente = window._ocItems.find(i => String(i.productoId) === String(prod.id));
     if (existente) {
         existente.cant++;
     } else {
@@ -308,6 +308,7 @@ window.ocConfirmar = async (provNombre, provId) => {
         const { error } = await supabase.from('ordenes_compra').insert({
             numero: numeroOC,
             proveedor: provNombre,
+            proveedor_id: provId, // FIX B-19: Guardamos el ID real para que no se pierda el historial
             estado: 'pendiente',
             items,
             total,
@@ -413,8 +414,9 @@ window.verHistorialProveedor = (id) => {
     const prov = DB.proveedores.find(p => p.id === id);
     if (!prov) return;
 
+    // FIX B-19: Filtrado robusto (Prioriza ID, fallback a nombre)
     const historial = (DB.ordenesCompra || [])
-        .filter(o => o.proveedor === prov.nombre)
+        .filter(o => (o.proveedor_id && String(o.proveedor_id) === String(prov.id)) || (o.proveedor === prov.nombre))
         .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
     const totalComprado = historial.reduce((acc, o) => acc + (o.total || 0), 0);
@@ -443,7 +445,6 @@ window.verHistorialProveedor = (id) => {
                 </div>
             </div>
 
-            <!-- Top productos -->
             ${topProductos.length > 0 ? `
             <div class="mb-5">
                 <p class="text-xs font-bold text-gray-500 uppercase mb-2">Productos más comprados</p>
@@ -456,7 +457,6 @@ window.verHistorialProveedor = (id) => {
                 </div>
             </div>` : ''}
 
-            <!-- Historial de órdenes -->
             ${historial.length === 0 ? `
                 <div class="text-center py-10 text-gray-400 bg-gray-50 rounded-xl">
                     <i data-lucide="clipboard-x" class="w-12 h-12 mx-auto mb-2 opacity-50"></i>
