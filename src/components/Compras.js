@@ -420,19 +420,14 @@ window.recibirOC = async (id, e) => {
     const orden = ordenes.find(x => x.id === id);
     if (!orden) return;
 
-    window.imprimirOC = (id) => {
-    const ordenes = DB.ordenes_compra || DB.ordenesCompra || [];
-    const oc = ordenes.find(x => x.id === id);
-    if (!oc) return;
-
+    // ── B-04: Guard de doble recepción ────────────────────────────────────────
     if ((orden.estado || '').toLowerCase().trim() === 'recibida') {
-    showNotification('Esta orden ya fue recibida anteriormente', 'error');
-    btn.disabled = false;
-    btn.innerHTML = '<i data-lucide="download" class="w-5 h-5"></i> Recibir Mercancía';
-    if (window.lucide) window.lucide.createIcons();
-    return;
+        showNotification('Esta orden ya fue recibida anteriormente', 'error');
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="download" class="w-5 h-5"></i> Recibir Mercancía';
+        if (window.lucide) window.lucide.createIcons();
+        return;
     }
-}
 
     try {
         for (const item of (orden.items || [])) {

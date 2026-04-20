@@ -15,6 +15,7 @@ import { renderConfiguracion } from './components/Configuracion.js';
 import { renderPerfil } from './components/Perfil.js';
 import { renderPos } from './components/Pos.js';
 import { renderMesas } from './components/Mesas.js';
+import {} from './components/Facturacion.js';
 
 window.AppState = AppState;
 window.DB = DB;

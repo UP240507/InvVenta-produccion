@@ -7,9 +7,9 @@ export function obtenerPermisosRolActual() {
     const rol = AppState.user?.rol || 'Mesero';
     switch (rol) {
         case 'Admin':
-            return ['dashboard','mesas','pos','compras_crear','entradas_mercancia','ajustes_inventario','productos','recetas','proveedores','reportes','configuracion','perfil'];
+            return ['dashboard','mesas','pos','compras_crear','entradas_mercancia','ajustes_inventario','productos','recetas','proveedores','reportes','facturas','configuracion','perfil'];
         case 'Gerente':
-            return ['dashboard','mesas','pos','compras_crear','entradas_mercancia','ajustes_inventario','productos','proveedores','reportes','configuracion','perfil'];
+            return ['dashboard','mesas','pos','compras_crear','entradas_mercancia','ajustes_inventario','productos','proveedores','reportes','facturas','configuracion','perfil'];
         case 'Cajero':
             return ['mesas','pos','perfil'];
         case 'Mesero':
@@ -107,7 +107,7 @@ export function renderLayout(contenidoPrincipalHTML) {
             { id:'recetas',     l:'Recetas de Menú', i:'chef-hat' },
             { id:'proveedores', l:'Proveedores',     i:'users' }
         ]},
-        { title: 'Análisis',  items: [{ id:'reportes',     l:'Reportes y Ventas',     i:'bar-chart-3' }] },
+        { title: 'Análisis',  items: [{ id:'reportes', l:'Reportes y Ventas', i:'bar-chart-3' }, { id:'facturas', l:'Facturas CFDI', i:'file-text' }] },
         { title: 'Sistema',   items: [{ id:'configuracion', l:'Configuración global',  i:'settings' }] }
     ];
 
@@ -116,7 +116,7 @@ export function renderLayout(contenidoPrincipalHTML) {
         'compras_crear':'Gestión de Compras','entradas_mercancia':'Recepción de Mercancía',
         'ajustes_inventario':'Ajustes y Mermas','productos':'Catálogo de Ingredientes',
         'recetas':'Recetas del Menú','proveedores':'Directorio de Proveedores',
-        'reportes':'Reportes y Analíticas','perfil':'Mi Perfil','configuracion':'Configuración del Sistema'
+        'reportes':'Reportes y Analíticas','facturas':'Facturas CFDI 4.0','perfil':'Mi Perfil','configuracion':'Configuración del Sistema'
     };
 
     const tituloPantallaActual = titulosHeader[AppState.currentScreen] || AppState.currentScreen.replace(/_/g,' ');

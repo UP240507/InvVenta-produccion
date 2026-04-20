@@ -494,30 +494,41 @@ window.procesarCSVSoftRestaurant = async (input) => {
             return;
         }
 
-        try {
-            await Promise.all([...cambios.values()].map(async ({ prod, totalDescuento, descripciones }) => {
-                const nuevoStock = prod.stock - totalDescuento;
-                const { error } = await supabase.from('productos')
-                    .update({ stock: nuevoStock })
-                    .eq('id', prod.id);
-                if (error) throw new Error(`Error actualizando ${prod.nombre}: ${error.message}`);
-                await registrarMovimientoEnNube(
-                    'Venta Externa', prod.id, -totalDescuento,
-                    `Sincronizado CSV: ${descripciones.join(', ')}`
-                );
-            }));
+        // ── B-06: Aplicar cambios en secuencia (no en paralelo) usando el RPC atómico.
+        // Razón: Promise.all dispara todas las escrituras a la vez sin garantía de orden.
+        // Si alguna falla a la mitad, los productos anteriores ya fueron descontados.
+        // El RPC decrementar_stock usa SELECT FOR UPDATE, eliminando también la race
+        // condition de leer stock desde memoria RAM.
+        const fallidos = [];
+        showNotification(`Aplicando ${cambios.size} cambio(s) al inventario...`, 'info');
 
-            input.value = '';
-            await cargarDatosDeNube();
-            window.render();
+        for (const { prod, totalDescuento, descripciones } of cambios.values()) {
+            const { error } = await supabase.rpc('decrementar_stock', {
+                p_producto_id: prod.id,
+                p_delta:       Number(totalDescuento.toFixed(4)),
+                p_referencia:  `CSV SoftRestaurant: ${descripciones.slice(0, 3).join(', ')}${descripciones.length > 3 ? '…' : ''}`,
+                p_usuario:     AppState.user?.nombre || 'Sistema',
+                p_tipo:        'Venta Externa (CSV)'
+            });
 
+            if (error) {
+                console.error(`Error descontando ${prod.nombre}:`, error);
+                fallidos.push(prod.nombre);
+            }
+        }
+
+        input.value = '';
+        await cargarDatosDeNube();
+        window.render();
+
+        if (fallidos.length === 0) {
             showNotification(`✅ ${procesados} ventas procesadas y descontadas del inventario.`, 'success');
-            if (errores > 0) alert(`Hubo ${errores} códigos en tu archivo que no existen en este sistema.\n\nEjemplos: ${logErrores.slice(0,3).join(', ')}\n\nAsegúrate de que el código POS sea idéntico en ambos sistemas.`);
+        } else {
+            showNotification(`⚠️ ${procesados - fallidos.length} de ${procesados} productos descontados. Fallaron: ${fallidos.join(', ')}`, 'error');
+        }
 
-        } catch (err) {
-            console.error('Error aplicando cambios CSV:', err);
-            showNotification('Error al aplicar cambios: ' + err.message, 'error');
-            input.value = '';
+        if (errores > 0) {
+            alert(`Hubo ${errores} códigos en tu archivo que no existen en este sistema.\n\nEjemplos: ${logErrores.slice(0, 3).join(', ')}\n\nAsegúrate de que el código POS sea idéntico en ambos sistemas.`);
         }
     };
     reader.readAsText(file);

@@ -47,6 +47,21 @@ localDB.version(3).stores({
     sync_queue: '++id, tabla, metodo, estado, fecha, createdAt'
 });
 
+localDB.version(4).stores({
+    configuracion: 'id',
+    productos:     'id',
+    recetas:       'id',
+    mesas:         'id',
+    ventas:        'id',
+    movimientos:   'id',
+    ordenes_compra:'id',
+    proveedores:   'id',
+    usuarios:      'id',
+    turnos:        'id',
+    sync_queue:    '++id, tabla, metodo, estado, fecha, createdAt',
+    facturas:      '++id, folio_venta, rfc_receptor, fecha_emision, estado'
+});
+
 // ─── 2. ESTADO GLOBAL DE LA APLICACIÓN ───────────────────────────────────────
 export const AppState = {
     user: null,
@@ -69,7 +84,8 @@ export const DB = {
     ordenesCompra: [],
     proveedores: [],
     usuarios: [],
-    turnos: []
+    turnos: [],
+    facturas: []
 };
 
 let isProcessingOfflineQueue = false;
@@ -84,7 +100,8 @@ const CLOUD_TABLES = {
     ordenes_compra: 'ordenes_compra',
     proveedores: 'proveedores',
     usuarios: 'usuarios',
-    turnos: 'turnos'
+    turnos: 'turnos',
+    facturas: 'facturas'
 };
 
 const MEMORY_TABLES = {
@@ -97,7 +114,8 @@ const MEMORY_TABLES = {
     ordenes_compra: 'ordenesCompra',
     proveedores: 'proveedores',
     usuarios: 'usuarios',
-    turnos: 'turnos'
+    turnos: 'turnos',
+    facturas: 'facturas'
 };
 
 function getMemoryTableName(tabla) {
@@ -336,7 +354,7 @@ export async function cargarDatosDeNube() {
         const [
             { data: conf }, { data: prod }, { data: rec },
             { data: mes }, { data: ven }, { data: mov },
-            { data: oc }, { data: prov }, { data: usu }, { data: tur }
+            { data: oc }, { data: prov }, { data: usu }, { data: tur }, { data: fact }
         ] = await Promise.all([
             supabase.from('configuracion').select('*').single(),
             supabase.from('productos').select('*').order('nombre'),
@@ -344,10 +362,11 @@ export async function cargarDatosDeNube() {
             supabase.from('mesas').select('*').order('nombre'),
             supabase.from('ventas').select('*').order('fecha', { ascending: false }).limit(300),
             supabase.from('movimientos').select('*').order('fecha', { ascending: false }).limit(300),
-            supabase.from('ordenes_compra').select('*').order('fecha', { ascending: false }),
+            supabase.from('ordenes_compra').select('*').order('fecha', { ascending: false }).limit(200),
             supabase.from('proveedores').select('*').order('nombre'),
             supabase.from('usuarios').select('*'),
-            supabase.from('turnos').select('*').order('fecha_apertura', { ascending: false }).limit(50)
+            supabase.from('turnos').select('*').order('fecha_apertura', { ascending: false }).limit(50),
+            supabase.from('facturas').select('*').order('fecha_emision', { ascending: false }).limit(200)
         ]);
 
         DB.configuracion = conf || {};
@@ -360,8 +379,9 @@ export async function cargarDatosDeNube() {
         DB.proveedores = prov || [];
         DB.usuarios = usu || [];
         DB.turnos = tur || [];
+        DB.facturas = fact || [];
 
-        await localDB.transaction('rw', localDB.configuracion, localDB.productos, localDB.recetas, localDB.mesas, localDB.ventas, localDB.movimientos, localDB.ordenes_compra, localDB.proveedores, localDB.usuarios, localDB.turnos, async () => {
+        await localDB.transaction('rw', localDB.configuracion, localDB.productos, localDB.recetas, localDB.mesas, localDB.ventas, localDB.movimientos, localDB.ordenes_compra, localDB.proveedores, localDB.usuarios, localDB.turnos, localDB.facturas, async () => {
             if (conf) await localDB.configuracion.put(conf);
             await localDB.productos.bulkPut(prod || []);
             await localDB.recetas.bulkPut(rec || []);
@@ -372,6 +392,7 @@ export async function cargarDatosDeNube() {
             await localDB.proveedores.bulkPut(prov || []);
             await localDB.usuarios.bulkPut(usu || []);
             await localDB.turnos.bulkPut(tur || []);
+            await localDB.facturas.bulkPut(fact || []);
         });
 
         AppState.isOffline = false;
@@ -390,6 +411,7 @@ export async function cargarDatosDeNube() {
         DB.proveedores = await localDB.proveedores.toArray();
         DB.usuarios = await localDB.usuarios.toArray();
         DB.turnos = await localDB.turnos.toArray();
+        DB.facturas = await localDB.facturas.toArray();
 
         if (window.showNotification) {
             window.showNotification('Estás en MODO OFFLINE. Usando datos guardados.', 'error');

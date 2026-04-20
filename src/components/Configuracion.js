@@ -2,6 +2,7 @@
 import { DB, AppState, cargarDatosDeNube } from '../store/state.js';
 import { supabase, supabaseAdminAuth } from '../api/supabase.js';
 import { SPINNER_ICON, showNotification, abrirModalConfirmacion } from '../utils/helpers.js';
+//import {hashPassword} from '/utils/auth.js'; 
 
 // Catálogo de todos los módulos bloqueables del sistema
 const MODULOS_SISTEMA = [
@@ -24,6 +25,14 @@ export function renderConfiguracion() {
     const mensajeTicket = conf.mensaje_ticket || '¡Gracias por su preferencia!';
     const ivaPorcentaje = (conf.iva || 0.16) * 100;
     const logoUrl = conf.logo_url || '';
+    const cfdiConf    = conf.cfdi_config || {};
+    const cfdiUser    = cfdiConf.facturama_user  || '';
+    const cfdiPass    = cfdiConf.facturama_pass  || '';
+    const cfdiSandbox = cfdiConf.sandbox !== false;
+    const cfdiRegimen = cfdiConf.regimen_fiscal  || '616';
+    const cfdiCP      = cfdiConf.codigo_postal   || '';
+    const cfdiSerie   = cfdiConf.serie           || 'A';
+    const printerBaud = conf.printer_baud || 9600;
     
     // Obtener permisos actuales o inicializar vacío
     const permisosGuardados = conf.permisos_roles || {};
@@ -341,6 +350,15 @@ window.saveConfig = async (e) => {
         mensaje_ticket: form.get('mensaje_ticket').trim(),
         logo_url: form.get('logo_url').trim(),
         iva: ivaDecimal,
+        printer_baud: parseInt(form.get('printer_baud')) || 9600,
+        cfdi_config: {
+            facturama_user: form.get('cfdi_user')?.trim()  || '',
+            facturama_pass: form.get('cfdi_pass')?.trim()  || '',
+            regimen_fiscal: form.get('cfdi_regimen')       || '616',
+            codigo_postal:  form.get('cfdi_cp')?.trim()    || '',
+            serie:          (form.get('cfdi_serie')?.trim().toUpperCase()) || 'A',
+            sandbox:        form.get('cfdi_sandbox') === 'on',
+        },
         permisos_roles: permisosRolesNuevos // Guardamos la matriz en la base de datos
     };
 
@@ -613,17 +631,25 @@ window.abrirModalUsuario = (id = null) => {
         
         try {
             if (!u) {
+                // Es un usuario nuevo
                 if (!plainPassword || plainPassword.length < 6) throw new Error('La contraseña debe tener al menos 6 caracteres');
                 const dummyEmail = `${safeUsername}@stockcentral.com`;
                 
+                // 1. Registro en el Auth de Supabase
                 const { error: authError } = await supabaseAdminAuth.auth.signUp({ email: dummyEmail, password: plainPassword });
                 if (authError) {
                     if(authError.message.includes('already registered')) throw new Error('Ese Login ID ya está en uso.');
                     throw new Error('Error Auth: ' + authError.message);
                 }
+                
+                // 2. BUG B-01 SOLUCIONADO: Hashear la contraseña antes de guardarla en la tabla pública
+                datos.password = await hashPassword(plainPassword); 
+                
                 datos.avatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(datos.nombre)}&background=random&color=fff`;
+            } else {
+                // Es una edición de usuario existente, no tocamos la contraseña
+                delete datos.password;
             }
-            delete datos.password; 
 
             const { error } = await supabase.from('usuarios').upsert(datos);
             if (error) throw error;

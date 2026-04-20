@@ -652,6 +652,34 @@ window.posConfirmarCobro = async () => {
         window.closeModal();
         showNotification(`✅ Venta cobrada correctamente (${folio})`, 'success');
 
+        // ── Ofrecer factura si el negocio tiene RFC y Facturama configurado ─────
+        const _cfgPos = (DB.configuracion || {}).cfdi_config || {};
+        if ((DB.configuracion || {}).rfc && _cfgPos.facturama_user) {
+            const _ventaPos = {
+                folio, total, subtotal,
+                metodo_pago: posState.metodoPago,
+                items: posState.orden.map(i => ({ nombre: i.receta.nombre, cantidad: i.cantidad, precio: i.precioUnit, subtotal: i.subtotal }))
+            };
+            setTimeout(() => {
+                window.openModal(`
+                    <div class="p-8 text-center">
+                        <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="file-text" class="w-8 h-8 text-blue-600"></i>
+                        </div>
+                        <h2 class="text-xl font-black text-slate-800 mb-2">¿El cliente necesita factura?</h2>
+                        <p class="text-slate-500 text-sm mb-6">Venta <b>${folio}</b> · <b>${formatCurrency(total)}</b></p>
+                        <div class="flex gap-3">
+                            <button onclick="closeModal()" class="flex-1 border-2 border-slate-200 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-50">No, gracias</button>
+                            <button onclick="closeModal(); window.abrirModalFactura(${JSON.stringify(_ventaPos).replace(/"/g,'&quot;')})"
+                                class="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-black hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 active:scale-95">
+                                <i data-lucide="file-text" class="w-5 h-5"></i> Sí, emitir CFDI
+                            </button>
+                        </div>
+                    </div>`);
+                if (window.lucide) window.lucide.createIcons();
+            }, 600);
+        }
+
         posState.orden = [];
         posState.descuento = 0;
         posState.propina = 0;
@@ -774,139 +802,78 @@ window.posGenerarOrdenCompra = async (productoIds) => {
 
 // ─── GENERADOR DE TICKET (ESC/POS RAW O HTML PDF) ────────────────────────────
 window.posImprimirTicket = async (folio, total, subtotal, descuentoAmt, propinaAmt) => {
-    const conf = DB.configuracion || {};
-    const empresa = conf.nombre_empresa || 'Stock Central';
-    const fecha = new Date().toLocaleString('es-MX');
-    const { metodoPago, descuento, propina, efectivoPagado, tarjetaPagado } = posState;
-    
-    // Si la impresora USB está conectada, usamos la magia del ESC/POS
-    if (window.ThermalPrinter.isConnected) {
+    const conf   = DB.configuracion || {};
+    const iva    = parseFloat(conf.iva) || 0;
+    const ivaAmt = iva > 0 ? subtotal * iva : 0;
+    const cambio = posState.metodoPago === 'efectivo' ? Math.max(0, (posState.efectivoPagado || 0) - total) : 0;
+
+    const ticketData = {
+        header: {
+            nombre:    conf.nombre_empresa || conf.nombreEmpresa || 'Restaurante',
+            rfc:       conf.rfc || '',
+            direccion: conf.direccion || '',
+            telefono:  conf.telefono || '',
+            folio,
+            fecha:     new Date().toLocaleString('es-MX', { hour12: false }),
+            cajero:    AppState.user?.nombre || 'Sistema',
+        },
+        lines: posState.orden.map(i => ({
+            cantidad: i.cantidad,
+            nombre:   i.receta.nombre,
+            precio:   formatCurrency(i.subtotal),
+            nota:     i.nota || '',
+        })),
+        footer: {
+            subtotal:  formatCurrency(subtotal),
+            descuento: descuentoAmt > 0 ? formatCurrency(descuentoAmt) : null,
+            iva:       ivaAmt > 0 ? formatCurrency(ivaAmt) : null,
+            total:     formatCurrency(total),
+            metodo:    posState.metodoPago,
+            recibido:  posState.efectivoPagado > 0 ? formatCurrency(posState.efectivoPagado) : null,
+            cambio:    cambio > 0 ? formatCurrency(cambio) : null,
+            mensaje:   conf.mensaje_ticket || '¡Gracias por su preferencia!',
+        },
+    };
+
+    // Impresora térmica ESC/POS (WebSerial)
+    if (window.ThermalPrinter?.isConnected) {
         try {
-            const encoder = new TextEncoder(); // Para codificar el texto a bytes
-            let buffer = [];
-            const push = (...bytes) => buffer.push(...bytes);
-            
-            // Función para limpiar acentos y escribir al buffer
-            const writeStr = (str) => {
-                const cleanStr = str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                push(...encoder.encode(cleanStr));
-            };
-
-            const padLR = (left, right, length=32) => {
-                const spaces = length - left.length - right.length;
-                return spaces < 1 ? left + " " + right : left + " ".repeat(spaces) + right;
-            };
-
-            // INIT PRINTER
-            push(0x1B, 0x40);
-
-            // CABECERA (Centrado, Doble tamaño, Negrita)
-            push(0x1B, 0x61, 0x01); // Alinear Centro
-            push(0x1B, 0x45, 0x01); // Negrita ON
-            push(0x1D, 0x21, 0x11); // Doble altura y anchura
-            writeStr(empresa + "\n");
-            
-            push(0x1D, 0x21, 0x00); // Texto normal
-            push(0x1B, 0x45, 0x00); // Negrita OFF
-            
-            if (conf.rfc) writeStr("RFC: " + conf.rfc + "\n");
-            if (conf.direccion) writeStr(conf.direccion + "\n");
-            if (conf.telefono) writeStr("Tel: " + conf.telefono + "\n");
-            
-            writeStr("--------------------------------\n");
-            writeStr(fecha + "\n");
-            writeStr("Folio: " + folio + "\n");
-            writeStr("Atendio: " + (AppState.user?.nombre || 'Caja') + "\n");
-            writeStr("--------------------------------\n");
-
-            // CUERPO (Alinear Izquierda)
-            push(0x1B, 0x61, 0x00); 
-            posState.orden.forEach(i => {
-                const row = padLR(`${i.cantidad}x ${i.receta.nombre.substring(0,18)}`, formatCurrency(i.subtotal));
-                writeStr(row + "\n");
-                if (i.nota) writeStr(`  * ${i.nota.substring(0,28)}\n`);
-            });
-            writeStr("--------------------------------\n");
-
-            // TOTALES (Alinear Izquierda)
-            if (descuentoAmt > 0) writeStr(padLR("DESC APLICADO:", "-" + formatCurrency(descuentoAmt)) + "\n");
-            if (propinaAmt > 0) writeStr(padLR("PROPINA:", "+" + formatCurrency(propinaAmt)) + "\n");
-            
-            push(0x1B, 0x45, 0x01); // Negrita ON
-            push(0x1D, 0x21, 0x01); // Doble altura
-            writeStr(padLR("TOTAL:", formatCurrency(total)) + "\n");
-            push(0x1D, 0x21, 0x00); // Normal
-            push(0x1B, 0x45, 0x00); // Negrita OFF
-            
-            writeStr("--------------------------------\n");
-            const iva = total - (total / (1 + (conf.iva || 0.16)));
-            writeStr(padLR(`SUB: ${formatCurrency(total-iva)}`, `IVA: ${formatCurrency(iva)}`) + "\n");
-            writeStr("--------------------------------\n");
-
-            // PIE DE PÁGINA (Centrado)
-            push(0x1B, 0x61, 0x01); 
-            writeStr("ESTE NO ES UN COMPROBANTE FISCAL\n");
-            writeStr((conf.mensaje_ticket || "Gracias por su visita") + "\n\n\n\n");
-            
-            // CORTAR PAPEL (Full cut)
-            push(0x1D, 0x56, 0x41, 0x03);
-
-            const success = await window.ThermalPrinter.imprimir(new Uint8Array(buffer));
-            if (success) return; // Si imprimió bien por USB, terminamos aquí.
-        } catch (e) {
-            console.error("Fallo la impresión USB, usando plan B", e);
-        }
+            window.ThermalPrinter.enqueue(window.ThermalPrinter.buildTicket(ticketData));
+            return;
+        } catch (err) { console.warn('[POS] Fallback a print():', err); }
     }
 
-    // ─── PLAN B: IMPRESIÓN PDF (El método anterior) ──────────────────────────
-    const rfcHtml = conf.rfc ? `<div class="center text-sm font-mono mt-1">RFC: ${conf.rfc}</div>` : '';
-    const logoHtml = conf.logo_url ? `<img src="${conf.logo_url}" class="ticket-logo">` : '';
-    const cambio = metodoPago === 'efectivo' && efectivoPagado > 0 ? efectivoPagado - total : 0;
-    
-    const ticketHTML = `
-        <html><head>
-            <title>Ticket de Venta</title>
-            <style>
-            body { font-family: 'Courier New', Courier, monospace; font-size: 13px; width: 280px; margin: 0 auto; padding: 10px 0; color: #000; line-height: 1.1; }
-            .center { text-align: center; } .bold { font-weight: bold; } .text-sm { font-size: 11px; }
-            .line { border-top: 1px dashed #000; margin: 6px 0; }
-            .row { display: flex; justify-content: space-between; margin: 3px 0; }
-            .total-row { font-size: 16px; font-weight: bold; margin-top: 5px; }
-            .item-list { width: 100%; border-collapse: collapse; margin: 8px 0; }
-            .item-list td { padding: 3px 0; vertical-align: top; }
-            .col-cant { width: 15%; } .col-desc { width: 60%; padding-right: 5px; } .col-precio { width: 25%; text-align: right; }
-            @media print { body { width: 100%; } }
-        </style></head>
-        <body>
-            ${logoHtml}
-            <div class="center bold" style="font-size:16px; text-transform: uppercase;">${empresa}</div>
-            ${rfcHtml}
-            <div class="line"></div>
-            <div class="center">${fecha}</div>
-            <div class="center">Folio de Venta: <b>${folio}</b></div>
-            <div class="line"></div>
-            <table class="item-list">
-                ${posState.orden.map(i => `
-                    <tr><td class="col-cant">${i.cantidad}</td><td class="col-desc">${i.receta.nombre.toUpperCase()}</td><td class="col-precio">${formatCurrency(i.subtotal)}</td></tr>
-                `).join('')}
-            </table>
-            <div class="line"></div>
-            <div class="row total-row"><span>TOTAL</span><span>${formatCurrency(total)}</span></div>
-            <div class="line"></div>
-            <div class="row text-sm" style="margin-top: 10px;"><span>PAGO:</span><span style="text-transform: capitalize;">${metodoPago}</span></div>
-            ${metodoPago === 'efectivo' && efectivoPagado > 0 ? `
-                <div class="row text-sm"><span>RECIBIDO:</span><span>${formatCurrency(efectivoPagado)}</span></div>
-                <div class="row bold"><span>CAMBIO:</span><span>${formatCurrency(cambio)}</span></div>
-            ` : ''}
-            <div class="center bold" style="margin-top: 15px; font-size: 12px;">ESTE NO ES UN COMPROBANTE FISCAL</div>
-        </body></html>
-    `;
-
-    const win = window.open('', '_blank', 'width=320,height=600');
-    if (win) {
-        win.document.write(ticketHTML);
-        win.document.close();
-        win.focus();
-        setTimeout(() => { win.print(); win.close(); }, 800);
-    }
+    // Fallback: ventana de impresión del navegador
+    const { header, lines, footer } = ticketData;
+    const pw = window.open('', '_blank', 'width=340,height=600');
+    if (!pw) return;
+    const row = (l, r) => `<div style="display:flex;justify-content:space-between"><span>${l}</span><span>${r}</span></div>`;
+    pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Courier New',monospace;font-size:12px;width:72mm;padding:4mm}
+        .center{text-align:center}.big{font-size:16px;font-weight:bold}
+        .hr{border-top:1px dashed #000;margin:4px 0}.item{display:flex;justify-content:space-between}
+    </style></head><body>
+    <div class="center big">${header.nombre}</div>
+    ${header.rfc ? `<div class="center">RFC: ${header.rfc}</div>` : ''}
+    ${header.direccion ? `<div class="center">${header.direccion}</div>` : ''}
+    ${header.telefono  ? `<div class="center">Tel: ${header.telefono}</div>` : ''}
+    <div class="hr"></div>
+    <div>Folio: <b>${header.folio}</b></div>
+    <div>Fecha: ${header.fecha}</div>
+    <div>Cajero: ${header.cajero}</div>
+    <div class="hr"></div>
+    ${lines.map(l => `<div class="item"><span>${l.cantidad}x ${l.nombre.substring(0,22)}</span><span>${l.precio}</span></div>${l.nota ? `<div style="padding-left:12px;color:#555">* ${l.nota}</div>` : ''}`).join('')}
+    <div class="hr"></div>
+    ${footer.descuento ? row('Descuento:', '-'+footer.descuento) : ''}
+    ${footer.iva       ? row('IVA:', footer.iva) : ''}
+    ${row('TOTAL:', '<b>'+footer.total+'</b>')}
+    ${footer.recibido  ? row('Recibido:', footer.recibido) : ''}
+    ${footer.cambio    ? row('Cambio:', '<b>'+footer.cambio+'</b>') : ''}
+    <div class="hr"></div>
+    <div class="center" style="margin-top:6px">${footer.mensaje}</div>
+    <br><br></body></html>`);
+    pw.document.close();
+    setTimeout(() => { pw.print(); pw.close(); }, 400);
 };
+

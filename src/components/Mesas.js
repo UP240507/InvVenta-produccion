@@ -882,6 +882,34 @@ window.mesaConfirmarCobro = async () => {
         window.closeModal();
         showNotification('✅ Venta cerrada. Mesa liberada.', 'success');
 
+        // ── Ofrecer factura ───────────────────────────────────────────────────
+        const _cfgMesa = (DB.configuracion || {}).cfdi_config || {};
+        if ((DB.configuracion || {}).rfc && _cfgMesa.facturama_user) {
+            const _ventaMesa = {
+                folio, total, subtotal, metodo_pago: mesaState.metodoPago,
+                mesa: mesaState.mesaActiva?.nombre,
+                items: mesaState.orden.map(i => ({ nombre: i.receta.nombre, cantidad: i.cantidad, precio: i.precioUnit, subtotal: i.subtotal }))
+            };
+            setTimeout(() => {
+                window.openModal(`
+                    <div class="p-8 text-center">
+                        <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <i data-lucide="file-text" class="w-8 h-8 text-blue-600"></i>
+                        </div>
+                        <h2 class="text-xl font-black text-slate-800 mb-2">¿El cliente necesita factura?</h2>
+                        <p class="text-slate-500 text-sm mb-6">Venta <b>${folio}</b> · Mesa <b>${mesaState.mesaActiva?.nombre || '—'}</b> · <b>${formatCurrency(total)}</b></p>
+                        <div class="flex gap-3">
+                            <button onclick="closeModal()" class="flex-1 border-2 border-slate-200 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-50">No, gracias</button>
+                            <button onclick="closeModal(); window.abrirModalFactura(${JSON.stringify(_ventaMesa).replace(/"/g,'&quot;')})"
+                                class="flex-[2] bg-blue-600 text-white py-3 rounded-xl font-black hover:bg-blue-700 shadow-lg flex items-center justify-center gap-2 active:scale-95">
+                                <i data-lucide="file-text" class="w-5 h-5"></i> Sí, emitir CFDI
+                            </button>
+                        </div>
+                    </div>`);
+                if (window.lucide) window.lucide.createIcons();
+            }, 600);
+        }
+
         mesaState.vista = 'mapa'; mesaState.mesaActiva = null; mesaState.orden = [];
         window.render();
     } catch (err) {
@@ -892,78 +920,80 @@ window.mesaConfirmarCobro = async () => {
 };
 
 // ─── TICKET TÉRMICO DE MESA ───────────────────────────────────────────────────
-window.mesaImprimirTicket = (folio, total, subtotalBase, descuentoAmt, propinaAmt) => {
-    const { metodoPago } = mesaState;
-    const conf = DB.configuracion || {};
-    const nombreComercial = conf.nombreEmpresa || conf.nombre_empresa || 'Restaurante';
-    const rfc = conf.rfc ? `RFC:${conf.rfc.toUpperCase()}` : '';
-    const ivaTasa = conf.iva || 0.16;
-    const subtotalDesglosado = total / (1 + ivaTasa);
-    const ivaDesglosado = total - subtotalDesglosado;
-    const mesaNom = mesaState.mesaActiva ? mesaState.mesaActiva.nombre : 'MOSTRADOR';
-    const personas = mesaState.mesaActiva ? mesaState.mesaActiva.capacidad : '1';
-    const mesero = AppState.user?.nombre || 'CAJERO';
-    const numOrden = folio.split('-').pop();
-    const fecha = new Date();
-    const fechaStr = `${fecha.getDate().toString().padStart(2,'0')}/${(fecha.getMonth()+1).toString().padStart(2,'0')}/${fecha.getFullYear()} ${fecha.getHours().toString().padStart(2,'0')}:${fecha.getMinutes().toString().padStart(2,'0')}`;
-    const logoHtml = conf.logo_url ? `<img src="${conf.logo_url}" class="ticket-logo">` : '';
-    const letrasTotal = numeroALetras(total);
+window.mesaImprimirTicket = (folio, total, subtotal, descuentoAmt, propinaAmt) => {
+    const conf   = DB.configuracion || {};
+    const iva    = parseFloat(conf.iva) || 0;
+    const ivaAmt = iva > 0 ? subtotal * iva : 0;
+    const cambio = mesaState.metodoPago === 'efectivo' ? Math.max(0, (mesaState.efectivoPagado || 0) - total) : 0;
 
-    const ticketHTML = `
-        <html><head><style>
-        body{font-family:'Courier New',monospace;font-size:13px;width:280px;margin:0 auto;padding:10px 0;color:#000;line-height:1.1}
-        .center{text-align:center}.bold{font-weight:bold}
-        .line{border-top:1px dashed #000;margin:8px 0}
-        .row{display:flex;justify-content:space-between;margin:4px 0}
-        .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:12px}
-        .ticket-logo{max-width:140px;max-height:90px;margin:0 auto 10px auto;display:block;filter:grayscale(100%)}
-        .item-list{width:100%;border-collapse:collapse;margin:8px 0}
-        .item-list td{padding:3px 0;vertical-align:top}
-        .col-cant{width:15%}.col-desc{width:60%;padding-right:5px}.col-precio{width:25%;text-align:right}
-        @media print{body{width:100%}@page{margin:0}}
-        </style></head><body>
-        ${logoHtml}
-        <div class="center"><div class="bold" style="font-size:16px">${nombreComercial.toUpperCase()}</div>
-        ${rfc ? `<div style="margin-top:2px">${rfc}</div>` : ''}
-        ${conf.direccion ? `<div style="margin-top:2px">${conf.direccion.toUpperCase()}</div>` : ''}
-        ${conf.telefono ? `<div>TEL:${conf.telefono}</div>` : ''}</div>
-        <div class="line"></div>
-        <div class="grid-2">
-            <div>MESA:${mesaNom.toUpperCase()}</div><div style="text-align:right">ORDEN:${numOrden}</div>
-            <div style="grid-column:span 2">MESERO:${mesero.toUpperCase()}</div>
-            <div>PERSONAS:${personas}</div><div style="text-align:right">PAGO:${metodoPago.toUpperCase().slice(0,3)}</div>
-            <div style="grid-column:span 2">FOLIO:${folio}</div>
-            <div style="grid-column:span 2">${fechaStr}</div>
-        </div>
-        <div class="line"></div>
-        <table class="item-list">
-            ${mesaState.orden.map(i => `
-                <tr><td class="col-cant">${i.cantidad}</td><td class="col-desc">${i.receta.nombre.toUpperCase()}</td><td class="col-precio">${formatCurrency(i.subtotal)}</td></tr>
-                ${i.nota ? `<tr><td></td><td colspan="2" style="font-size:10px;font-style:italic;color:#444">* ${i.nota.toUpperCase()}</td></tr>` : ''}
-            `).join('')}
-        </table>
-        <div class="line"></div>
-        ${descuentoAmt>0 ? `<div class="row" style="font-size:11px"><span>DESC.APLICADO:</span><span>-${formatCurrency(descuentoAmt)}</span></div>` : ''}
-        ${propinaAmt>0 ? `<div class="row" style="font-size:11px"><span>PROPINA:</span><span>+${formatCurrency(propinaAmt)}</span></div>` : ''}
-        <div class="row bold" style="font-size:16px;margin:10px 0"><span style="margin-left:auto;padding-right:20px">TOTAL:</span><span>${formatCurrency(total)}</span></div>
-        <div class="line"></div>
-        <div style="margin:10px 0;font-size:11px">${letrasTotal}</div>
-        <div class="center" style="margin:10px 0;font-size:12px">
-            <span style="margin-right:15px">SUBTOTAL:${formatCurrency(subtotalDesglosado)}</span>
-            <span>IVA:${formatCurrency(ivaDesglosado)}</span>
-        </div>
-        <div class="center" style="margin-top:15px;font-size:12px;font-weight:bold">
-            <div>ESTE NO ES UN COMPROBANTE FISCAL</div>
-            <div style="margin-top:4px">${conf.mensaje_ticket ? conf.mensaje_ticket.toUpperCase() : '¡GRACIAS POR SU VISITA!'}</div>
-        </div>
-        <div class="center" style="margin-top:25px;font-size:10px;color:#666">*** STOCK CENTRAL POS ***</div>
-        </body></html>`;
+    const ticketData = {
+        header: {
+            nombre:    conf.nombre_empresa || conf.nombreEmpresa || 'Restaurante',
+            rfc:       conf.rfc || '',
+            direccion: conf.direccion || '',
+            telefono:  conf.telefono || '',
+            folio,
+            fecha:     new Date().toLocaleString('es-MX', { hour12: false }),
+            cajero:    AppState.user?.nombre || 'Sistema',
+            mesa:      mesaState.mesaActiva?.nombre || '',
+        },
+        lines: mesaState.orden.map(i => ({
+            cantidad: i.cantidad,
+            nombre:   i.receta.nombre,
+            precio:   formatCurrency(i.subtotal),
+            nota:     i.nota || '',
+        })),
+        footer: {
+            subtotal:  formatCurrency(subtotal),
+            descuento: descuentoAmt > 0 ? formatCurrency(descuentoAmt) : null,
+            iva:       ivaAmt > 0 ? formatCurrency(ivaAmt) : null,
+            total:     formatCurrency(total),
+            metodo:    mesaState.metodoPago,
+            recibido:  mesaState.efectivoPagado > 0 ? formatCurrency(mesaState.efectivoPagado) : null,
+            cambio:    cambio > 0 ? formatCurrency(cambio) : null,
+            mensaje:   conf.mensaje_ticket || '¡Gracias por su preferencia!',
+        },
+    };
 
-    const win = window.open('', '_blank', 'width=320,height=600');
-    if (win) { win.document.write(ticketHTML); win.document.close(); win.focus(); setTimeout(() => { win.print(); win.close(); }, 800); }
+    if (window.ThermalPrinter?.isConnected) {
+        try { window.ThermalPrinter.enqueue(window.ThermalPrinter.buildTicket(ticketData)); return; }
+        catch (err) { console.warn('[Mesas] Fallback print():', err); }
+    }
+
+    const { header, lines, footer } = ticketData;
+    const pw = window.open('', '_blank', 'width=340,height=600');
+    if (!pw) return;
+    const row = (l, r) => `<div style="display:flex;justify-content:space-between"><span>${l}</span><span>${r}</span></div>`;
+    pw.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Courier New',monospace;font-size:12px;width:72mm;padding:4mm}
+        .center{text-align:center}.big{font-size:16px;font-weight:bold}
+        .hr{border-top:1px dashed #000;margin:4px 0}
+    </style></head><body>
+    <div class="center big">${header.nombre}</div>
+    ${header.rfc ? `<div class="center">RFC: ${header.rfc}</div>` : ''}
+    ${header.direccion ? `<div class="center">${header.direccion}</div>` : ''}
+    <div class="hr"></div>
+    <div>Folio: <b>${header.folio}</b></div>
+    <div>Fecha: ${header.fecha}</div>
+    <div>Cajero: ${header.cajero}</div>
+    ${header.mesa ? `<div>Mesa: <b>${header.mesa}</b></div>` : ''}
+    <div class="hr"></div>
+    ${lines.map(l => `<div style="display:flex;justify-content:space-between"><span>${l.cantidad}x ${l.nombre.substring(0,22)}</span><span>${l.precio}</span></div>${l.nota ? `<div style="padding-left:12px;color:#555">* ${l.nota}</div>` : ''}`).join('')}
+    <div class="hr"></div>
+    ${footer.descuento ? row('Descuento:', '-'+footer.descuento) : ''}
+    ${footer.iva       ? row('IVA:', footer.iva) : ''}
+    ${row('TOTAL:', '<b>'+footer.total+'</b>')}
+    ${footer.recibido  ? row('Recibido:', footer.recibido) : ''}
+    ${footer.cambio    ? row('Cambio:', '<b>'+footer.cambio+'</b>') : ''}
+    <div class="hr"></div>
+    <div class="center" style="margin-top:6px">${footer.mensaje}</div>
+    <br><br></body></html>`);
+    pw.document.close();
+    setTimeout(() => { pw.print(); pw.close(); }, 400);
 };
 
-// ─── Scanner ──────────────────────────────────────────────────────────────────
+
 window.mesaScanner = (codigo) => {
     if (mesaState.vista !== 'pos') return;
     const receta = DB.recetas.find(r => (r.codigo_pos||'').toLowerCase() === codigo.toLowerCase());
