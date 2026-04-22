@@ -2,7 +2,7 @@
 import { DB, AppState, cargarDatosDeNube } from '../store/state.js';
 import { supabase, supabaseAdminAuth } from '../api/supabase.js';
 import { SPINNER_ICON, showNotification, abrirModalConfirmacion } from '../utils/helpers.js';
-//import {hashPassword} from '/utils/auth.js'; 
+import { hashPassword } from '../utils/auth.js';
 
 // Catálogo de todos los módulos bloqueables del sistema
 const MODULOS_SISTEMA = [
@@ -153,6 +153,73 @@ export function renderConfiguracion() {
                                 <button type="submit" id="btnSaveConf" class="mt-8 w-full bg-blue-600 text-white py-4 rounded-xl font-black text-sm hover:bg-blue-700 shadow-lg shadow-blue-200 transition-transform active:scale-95 flex justify-center items-center gap-2">
                                     <i data-lucide="save" class="w-5 h-5"></i> Guardar Todo
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── CFDI 4.0 ──────────────────────────────────────────────────────────── -->
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div class="bg-blue-50 px-6 py-4 border-b border-blue-100 flex items-center gap-2">
+                        <i data-lucide="file-text" class="w-5 h-5 text-blue-500"></i>
+                        <h3 class="font-bold text-slate-700">Facturación CFDI 4.0</h3>
+                        <span class="ml-auto text-[10px] font-black px-2 py-1 rounded-md ${cfdiSandbox ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}">${cfdiSandbox ? 'SANDBOX' : 'PRODUCCIÓN'}</span>
+                    </div>
+                    <div class="p-6 space-y-5">
+                        <div class="bg-blue-50 border border-blue-100 rounded-xl p-3 text-sm text-blue-800">
+                            <b>PAC:</b> Facturama · <a href="https://www.facturama.mx" target="_blank" class="underline hover:text-blue-600">facturama.mx</a>
+                            · Requiere cuenta activa y CSD subido a su portal.
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Usuario Facturama</label>
+                                <input name="cfdi_user" value="${cfdiUser}" placeholder="tu_usuario_facturama"
+                                    class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Contraseña Facturama</label>
+                                <input name="cfdi_pass" type="password" value="${cfdiPass}" placeholder="••••••••"
+                                    class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                            <div class="sm:col-span-2">
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Régimen Fiscal SAT</label>
+                                <select name="cfdi_regimen" class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-sm">
+                                    <option value="601" ${cfdiRegimen==='601'?'selected':''}>601 · General Personas Morales</option>
+                                    <option value="612" ${cfdiRegimen==='612'?'selected':''}>612 · Pers. Físicas Act. Emp.</option>
+                                    <option value="616" ${cfdiRegimen==='616'?'selected':''}>616 · Sin obligaciones fiscales</option>
+                                    <option value="621" ${cfdiRegimen==='621'?'selected':''}>621 · Incorporación Fiscal</option>
+                                    <option value="626" ${cfdiRegimen==='626'?'selected':''}>626 · RESICO</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">CP de Expedición</label>
+                                <input name="cfdi_cp" value="${cfdiCP}" maxlength="5" placeholder="64000"
+                                    class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Serie</label>
+                                <input name="cfdi_serie" value="${cfdiSerie}" maxlength="5" placeholder="A"
+                                    class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono uppercase">
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 uppercase tracking-widest mb-1">Velocidad impresora térmica</label>
+                                <select name="printer_baud" class="w-full border border-slate-300 p-3 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none bg-white text-sm">
+                                    <option value="9600"   ${printerBaud==9600  ?'selected':''}>9600 (estándar)</option>
+                                    <option value="19200"  ${printerBaud==19200 ?'selected':''}>19200</option>
+                                    <option value="38400"  ${printerBaud==38400 ?'selected':''}>38400</option>
+                                    <option value="115200" ${printerBaud==115200?'selected':''}>115200</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
+                                <input type="checkbox" id="cfdi_sandbox" name="cfdi_sandbox" ${cfdiSandbox?'checked':''}
+                                    class="w-4 h-4 accent-amber-500">
+                                <label for="cfdi_sandbox" class="text-sm font-bold text-amber-800 cursor-pointer">
+                                    Modo sandbox — desactiva para emitir CFDIs reales al SAT
+                                </label>
                             </div>
                         </div>
                     </div>

@@ -15,10 +15,13 @@ import { renderConfiguracion } from './components/Configuracion.js';
 import { renderPerfil } from './components/Perfil.js';
 import { renderPos } from './components/Pos.js';
 import { renderMesas } from './components/Mesas.js';
-import {} from './components/Facturacion.js';
+import { renderFacturacion, abrirModalFactura } from './components/Facturacion.js';
+import { mountPrinterWidget } from './components/PrinterStatus.js';
+import './services/thermalPrinter.js';
 
 window.AppState = AppState;
 window.DB = DB;
+window.abrirModalFactura = abrirModalFactura;
 
 window.openModal = function(content) {
     const root = document.getElementById('modal-root');
@@ -389,12 +392,14 @@ window.render = function() {
             case 'perfil':              contenidoHTML = renderPerfil();              break;
             case 'mesas':               contenidoHTML = renderMesas();               break;
             case 'pos':                 contenidoHTML = renderPos();                 break;
+            case 'facturas':            contenidoHTML = renderFacturacion();         break;
             default: contenidoHTML = '<div class="text-center py-20 text-gray-400">Pantalla en construcción...</div>';
         }
     }
 
     root.innerHTML = renderLayout(contenidoHTML);
     if (window.lucide) lucide.createIcons();
+    mountPrinterWidget();
 
     if (AppState.currentScreen === 'dashboard') {
         setTimeout(() => {

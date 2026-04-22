@@ -914,7 +914,10 @@ window.mesaConfirmarCobro = async () => {
         window.render();
     } catch (err) {
         console.error(err);
-        showNotification('Error al cobrar: ' + err.message, 'error');
+        console.error('[Mesas] Error en venta:', err);
+        const detalle = err?.details || err?.hint || '';
+        const msg = err?.message || String(err);
+        showNotification(`Error al cobrar: ${msg}${detalle ? ' — ' + detalle : ''}`, 'error');
         if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="printer"></i> Reintentar'; }
     }
 };

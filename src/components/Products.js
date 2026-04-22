@@ -21,7 +21,7 @@ export function renderProductos() {
         const filtered = DB.productos.filter(p => {
             const coincideTexto = p.nombre.toLowerCase().includes(term.toLowerCase()) || 
                                   p.codigo.toLowerCase().includes(term.toLowerCase());
-            const coincideCat = cat === '' || p.cat === cat;
+            const coincideCat = cat === '' || p.categoria === cat;
             return coincideTexto && coincideCat;
         });
 
@@ -35,7 +35,7 @@ export function renderProductos() {
             <tr class="hover:bg-gray-50 transition-colors group border-b border-gray-100">
                 <td class="p-4 font-mono text-gray-500 group-hover:text-blue-600">${p.codigo}</td>
                 <td class="p-4 font-bold text-gray-800">${p.nombre}</td>
-                <td class="p-4 text-gray-600"><span class="bg-gray-100 px-2 py-1 rounded text-xs border">${p.cat}</span></td>
+                <td class="p-4 text-gray-600"><span class="bg-gray-100 px-2 py-1 rounded text-xs border">${p.categoria}</span></td>
                 <td class="p-4 text-center font-bold ${p.stock <= p.min ? 'text-red-600 bg-red-50 rounded-lg' : 'text-gray-800'}">${Number.isInteger(p.stock) ? p.stock : parseFloat(p.stock.toFixed(4))} <span class="text-xs font-normal text-gray-500">${p.unidad}</span></td>
                 <td class="p-4 text-right font-medium text-gray-600">${formatCurrency(p.precio)}</td>
                 ${esAdmin ? `
@@ -100,8 +100,8 @@ export function renderProductos() {
                         </div>
                         <div>
                             <label class="block text-sm font-medium text-gray-700">Categoría</label>
-                            <select name="cat" class="w-full border p-2 rounded-lg bg-white">
-                                ${DB.categorias.map(c => `<option value="${c}" ${p?.cat===c?'selected':''}>${c}</option>`).join('')}
+                            <select name="categoria" class="w-full border p-2 rounded-lg bg-white">
+                                ${DB.categorias.map(c => `<option value="${c}" ${p?.categoria===c?'selected':''}>${c}</option>`).join('')}
                             </select>
                         </div>
                     </div>
@@ -143,7 +143,7 @@ export function renderProductos() {
             const datos = {
                 codigo: fd.get('codigo'),
                 nombre: fd.get('nombre'),
-                cat: fd.get('cat'),
+                categoria: fd.get('categoria'),
                 precio: parseFloat(fd.get('precio')),
                 min: parseFloat(fd.get('min')),
                 unidad: fd.get('unidad'),

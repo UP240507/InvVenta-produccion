@@ -85,7 +85,10 @@ export const DB = {
     proveedores: [],
     usuarios: [],
     turnos: [],
-    facturas: []
+    facturas: [],
+    // Shortcuts reactivos: leen directamente de DB.configuracion
+    get categorias() { return Array.isArray(this.configuracion?.categorias) ? this.configuracion.categorias : []; },
+    get unidades()   { return Array.isArray(this.configuracion?.unidades)   ? this.configuracion.unidades   : []; },
 };
 
 let isProcessingOfflineQueue = false;

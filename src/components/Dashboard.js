@@ -494,38 +494,35 @@ window.procesarCSVSoftRestaurant = async (input) => {
             return;
         }
 
-        // ── B-06: Aplicar cambios en secuencia (no en paralelo) usando el RPC atómico.
-        // Razón: Promise.all dispara todas las escrituras a la vez sin garantía de orden.
-        // Si alguna falla a la mitad, los productos anteriores ya fueron descontados.
-        // El RPC decrementar_stock usa SELECT FOR UPDATE, eliminando también la race
-        // condition de leer stock desde memoria RAM.
-        const fallidos = [];
-        showNotification(`Aplicando ${cambios.size} cambio(s) al inventario...`, 'info');
+        // ── B-06: Un solo RPC transaccional para todo el lote.
+        // procesar_inventario_masivo itera en PostgreSQL y llama a decrementar_stock
+        // por cada producto. Si cualquiera falla, Postgres revierte todo el lote —
+        // garantía todo-o-nada sin múltiples round-trips.
+        const payload = [...cambios.values()].map(({ prod, totalDescuento, descripciones }) => ({
+            id:         prod.id,
+            delta:      Number(totalDescuento.toFixed(4)),
+            referencia: `CSV: ${descripciones.slice(0, 3).join(', ')}${descripciones.length > 3 ? '…' : ''}`,
+            usuario:    AppState.user?.nombre || 'Sistema'
+        }));
 
-        for (const { prod, totalDescuento, descripciones } of cambios.values()) {
-            const { error } = await supabase.rpc('decrementar_stock', {
-                p_producto_id: prod.id,
-                p_delta:       Number(totalDescuento.toFixed(4)),
-                p_referencia:  `CSV SoftRestaurant: ${descripciones.slice(0, 3).join(', ')}${descripciones.length > 3 ? '…' : ''}`,
-                p_usuario:     AppState.user?.nombre || 'Sistema',
-                p_tipo:        'Venta Externa (CSV)'
-            });
+        showNotification(`Aplicando ${payload.length} cambio(s) al inventario...`, 'info');
 
-            if (error) {
-                console.error(`Error descontando ${prod.nombre}:`, error);
-                fallidos.push(prod.nombre);
-            }
-        }
+        const { error: rpcError } = await supabase.rpc('procesar_inventario_masivo', {
+            p_payload: payload
+        });
 
         input.value = '';
+
+        if (rpcError) {
+            console.error('Error en procesar_inventario_masivo:', rpcError);
+            showNotification('Error al aplicar cambios: ' + rpcError.message, 'error');
+            return;
+        }
+
         await cargarDatosDeNube();
         window.render();
 
-        if (fallidos.length === 0) {
-            showNotification(`✅ ${procesados} ventas procesadas y descontadas del inventario.`, 'success');
-        } else {
-            showNotification(`⚠️ ${procesados - fallidos.length} de ${procesados} productos descontados. Fallaron: ${fallidos.join(', ')}`, 'error');
-        }
+        showNotification(`✅ ${procesados} ventas procesadas y descontadas del inventario.`, 'success');
 
         if (errores > 0) {
             alert(`Hubo ${errores} códigos en tu archivo que no existen en este sistema.\n\nEjemplos: ${logErrores.slice(0, 3).join(', ')}\n\nAsegúrate de que el código POS sea idéntico en ambos sistemas.`);

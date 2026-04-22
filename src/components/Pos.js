@@ -18,41 +18,7 @@ let posState = {
 
 window.posState = posState;
 
-// ─── MOTOR DE IMPRESIÓN DIRECTA ESC/POS (USB) ────────────────────────────────
-window.ThermalPrinter = {
-    port: null,
-    isConnected: false,
-    
-    conectar: async function() {
-        if (!navigator.serial) {
-            return showNotification('Tu navegador no soporta conexión USB directa. Usa Chrome o Edge en PC.', 'error');
-        }
-        try {
-            this.port = await navigator.serial.requestPort();
-            await this.port.open({ baudRate: 9600 }); // 9600 es el estándar de casi todas las miniprinters
-            this.isConnected = true;
-            showNotification('✅ Impresora USB Conectada', 'success');
-            window.render();
-        } catch (err) {
-            console.error('Error al conectar impresora:', err);
-            showNotification('No se pudo conectar la impresora USB', 'error');
-        }
-    },
-
-    imprimir: async function(lineasEscPos) {
-        if (!this.port || !this.isConnected) return false;
-        try {
-            const writer = this.port.writable.getWriter();
-            await writer.write(lineasEscPos);
-            writer.releaseLock();
-            return true;
-        } catch (err) {
-            console.error('Error de escritura USB:', err);
-            this.isConnected = false;
-            return false;
-        }
-    }
-};
+// ThermalPrinter gestionado por src/services/thermalPrinter.js (window.ThermalPrinter)
 
 // ─── HELPERS LOCALES ─────────────────────────────────────────────────────────
 function calcTotales() {
@@ -165,10 +131,10 @@ export function renderPos() {
                     <p class="text-slate-400 text-[10px] uppercase tracking-widest mt-0.5">${new Date().toLocaleDateString('es-MX', {weekday:'long', day:'numeric', month:'short'})}</p>
                 </div>
                 <div class="flex gap-2">
-                    <button type="button" onclick="window.ThermalPrinter.conectar()" 
-                        class="p-2 rounded-lg transition-all ${window.ThermalPrinter.isConnected ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-400 hover:text-white'}" 
-                        title="${window.ThermalPrinter.isConnected ? 'Impresora USB Conectada' : 'Conectar Impresora USB'}">
-                        <i data-lucide="${window.ThermalPrinter.isConnected ? 'plug' : 'usb'}" class="w-5 h-5"></i>
+                    <button type="button" onclick="window.ThermalPrinter?.isConnected ? window.disconnectPrinter() : window.connectPrinter()" 
+                        class="p-2 rounded-lg transition-all ${window.ThermalPrinter?.isConnected ? 'bg-green-500/20 text-green-400' : 'bg-slate-800 text-slate-400 hover:text-white'}" 
+                        title="${window.ThermalPrinter?.isConnected ? 'Impresora conectada (clic para desconectar)' : 'Conectar impresora ESC/POS'}">
+                        <i data-lucide="${window.ThermalPrinter?.isConnected ? 'plug' : 'usb'}" class="w-5 h-5"></i>
                     </button>
                     <button type="button" onclick="window.posCancelarOrden()" class="text-slate-400 hover:text-red-400 hover:bg-slate-800 p-2 rounded-lg transition-all" title="Limpiar orden">
                         <i data-lucide="trash-2" class="w-5 h-5"></i>
@@ -698,9 +664,13 @@ window.posConfirmarCobro = async () => {
         }
 
     } catch (err) {
-        console.error(err);
-        showNotification('Error crítico al procesar venta: ' + err.message, 'error');
-        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="printer"></i> Reintentar Cobro'; }
+        console.error('[POS] Error en venta:', err);
+        // Mostrar detalle completo: mensaje + hint de Supabase si existe
+        const detalle = err?.details || err?.hint || '';
+        const msg = err?.message || String(err);
+        showNotification(`Error: ${msg}${detalle ? ' — ' + detalle : ''}`, 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="printer" class="w-5 h-5"></i> Reintentar Cobro'; }
+        if (window.lucide) window.lucide.createIcons();
     }
 };
 

@@ -44,6 +44,9 @@ window.irAPantallaDesdeNotif = (pantallaDestino) => {
 function getAlertasLeidas() {
     try { return JSON.parse(localStorage.getItem('pos_alertas_leidas') || '[]'); } catch { return []; }
 }
+function guardarAlertasLeidas(arr) {
+    try { localStorage.setItem('pos_alertas_leidas', JSON.stringify(arr)); } catch {}
+}
 
 window.descartarAlerta = (id) => {
     const leidas = getAlertasLeidas();
@@ -212,6 +215,30 @@ export function renderLayout(contenidoPrincipalHTML) {
                                 <i data-lucide="bell" class="w-5 h-5"></i>
                                 ${totalNotif > 0 ? `<span class="absolute -top-1.5 -right-1.5 bg-red-500 border-2 border-white text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center shadow-sm">${totalNotif > 9 ? '9+' : totalNotif}</span>` : ''}
                             </button>
+                            <!-- Panel de notificaciones -->
+                            <div id="notifPanel" class="hidden absolute right-0 top-12 w-80 bg-white border border-slate-200 rounded-2xl shadow-2xl z-50 overflow-hidden">
+                                <div class="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+                                    <p class="font-black text-slate-700 text-sm">Notificaciones</p>
+                                    ${totalNotif > 0 ? `<button onclick="window.marcarTodasLeidas()" class="text-[10px] font-bold text-blue-600 hover:underline">Marcar todo como leído</button>` : ''}
+                                </div>
+                                <div class="max-h-80 overflow-y-auto divide-y divide-slate-50">
+                                    ${notifs.length === 0 ? `
+                                    <div class="p-8 text-center">
+                                        <i data-lucide="bell-off" class="w-8 h-8 text-slate-300 mx-auto mb-2"></i>
+                                        <p class="text-sm text-slate-400 font-medium">Sin notificaciones nuevas</p>
+                                    </div>` : notifs.map(n => `
+                                    <div class="flex items-start gap-3 p-4 hover:bg-slate-50 transition-colors cursor-pointer" onclick="window.irADestino('${n.destino}'); window.marcarLeida('${n.id}')">
+                                        <div class="${n.bg} ${n.border} border rounded-xl p-2 flex-shrink-0 mt-0.5">
+                                            <i data-lucide="${n.icono}" class="w-4 h-4 ${n.color}"></i>
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <p class="font-bold text-slate-800 text-sm leading-tight">${n.titulo}</p>
+                                            <p class="text-xs text-slate-500 mt-0.5 leading-snug">${n.mensaje}</p>
+                                            <p class="text-[10px] font-bold ${n.color} mt-1.5 uppercase tracking-widest">${n.accionLabel} →</p>
+                                        </div>
+                                    </div>`).join('')}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </header>
@@ -247,4 +274,38 @@ window.toggleNotifPanel = () => {
             });
         }, 100);
     }
+};
+
+window.irADestino = (destino) => {
+    AppState.currentScreen = destino;
+    AppState.isSidebarOpen = false;
+    const panel = document.getElementById('notifPanel');
+    if (panel) panel.classList.add('hidden');
+    window.render();
+};
+
+window.marcarLeida = (id) => {
+    const leidas = getAlertasLeidas();
+    if (!leidas.includes(id)) {
+        guardarAlertasLeidas([...leidas, id]);
+    }
+    // Re-renderizar solo el badge y panel sin hacer render() completo
+    const badge = document.querySelector('#btnCampana span');
+    const panel = document.getElementById('notifPanel');
+    const notifs = generarNotificaciones();
+    if (badge) {
+        if (notifs.length > 0) {
+            badge.textContent = notifs.length > 9 ? '9+' : notifs.length;
+        } else {
+            badge.remove();
+        }
+    }
+    if (panel) panel.classList.add('hidden');
+};
+
+window.marcarTodasLeidas = () => {
+    const notifs = generarNotificaciones();
+    const ids = notifs.map(n => n.id);
+    guardarAlertasLeidas(ids);
+    window.render();
 };
