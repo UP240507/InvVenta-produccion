@@ -71,7 +71,17 @@ export const AppState = {
     isOffline: !navigator.onLine,
     tempData: {},
     cart: [],
-    searchTerm: ''
+    searchTerm: '',
+    // Paginación y filtros (se usan sin declarar — JS los crea implícito pero es mejor declararlos)
+    productosPage: 1,
+    filterCategory: '',
+    reportDateStart: '',
+    reportDateEnd: '',
+    reporteActivo: 'valorizacion',
+    reporteMesero: '',
+    reporteTurnoId: null,
+    comprasTab: 'historial',
+    entradasTab: 'pendientes',
 };
 
 export const DB = {

@@ -412,7 +412,8 @@ export function renderEntradasMercancia() {
 
 // ─── Lógica para ingresar al inventario ──────────────────────────────────────
 window.recibirOC = async (id, e) => {
-    const btn = e.target.closest('button'); 
+    const btn = e.target.closest('button');
+    if (!btn) return;
     btn.disabled = true; 
     btn.innerHTML = SPINNER_ICON + " Recibiendo...";
 
